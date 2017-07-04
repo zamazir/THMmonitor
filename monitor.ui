@@ -1,0 +1,447 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>901</width>
+    <height>614</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">background-color: rgb(118, 118, 118);
+color: rgb(255, 255, 255);</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="verticalLayout_2">
+    <item>
+     <layout class="QHBoxLayout" name="horizontalLayout_4">
+      <item>
+       <widget class="QWidget" name="windowContainer" native="true">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>600</width>
+          <height>0</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QTableWidget" name="sensorTable">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>450</width>
+          <height>16777215</height>
+         </size>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">background-color: rgb(255, 255, 255);</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <widget class="QWidget" name="widget" native="true">
+      <property name="styleSheet">
+       <string notr="true">background-color: rgb(153, 153, 153);
+color: rgb(0, 0, 0);</string>
+      </property>
+      <layout class="QVBoxLayout" name="verticalLayout">
+       <item>
+        <layout class="QHBoxLayout" name="horizontalLayout_3">
+         <item>
+          <widget class="QPushButton" name="btnPan">
+           <property name="toolTip">
+            <string>Left-click &amp; drag to pan, Right-click &amp; pan to zoom in x- and/or y-direction</string>
+           </property>
+           <property name="styleSheet">
+            <string notr="true">background-color: rgb(255, 255, 255);</string>
+           </property>
+           <property name="text">
+            <string>Pan</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btnZoom">
+           <property name="toolTip">
+            <string>Left-click &amp; drag to zoom into a rectangle. Right-click &amp; drag to zoom out</string>
+           </property>
+           <property name="styleSheet">
+            <string notr="true">background-color: rgb(255, 255, 255);</string>
+           </property>
+           <property name="text">
+            <string>Zoom</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btnShowAll">
+           <property name="toolTip">
+            <string>Zoom to range</string>
+           </property>
+           <property name="styleSheet">
+            <string notr="true">background-color: rgb(255, 255, 255);
+</string>
+           </property>
+           <property name="text">
+            <string>Zoom to</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QComboBox" name="comboLimits"/>
+         </item>
+         <item>
+          <widget class="QLabel" name="label_3">
+           <property name="maximumSize">
+            <size>
+             <width>70</width>
+             <height>16777215</height>
+            </size>
+           </property>
+           <property name="text">
+            <string>Compare to</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QComboBox" name="comboCompareTo">
+           <item>
+            <property name="text">
+             <string>None</string>
+            </property>
+           </item>
+           <item>
+            <property name="text">
+             <string>TVAC temperature</string>
+            </property>
+           </item>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btnClear">
+           <property name="toolTip">
+            <string>Remove all graphs from plot</string>
+           </property>
+           <property name="styleSheet">
+            <string notr="true">background-color: rgb(255, 255, 255);
+</string>
+           </property>
+           <property name="text">
+            <string>Clear</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="horizontalLayout_2">
+         <item>
+          <widget class="QLabel" name="label">
+           <property name="maximumSize">
+            <size>
+             <width>130</width>
+             <height>16777215</height>
+            </size>
+           </property>
+           <property name="text">
+            <string>Only show the last</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLineEdit" name="editWindowWidth">
+           <property name="maximumSize">
+            <size>
+             <width>50</width>
+             <height>16777215</height>
+            </size>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="label_2">
+           <property name="text">
+            <string>minutes</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="horizontalSpacer_2">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeType">
+            <enum>QSizePolicy::Fixed</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>60</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QCheckBox" name="cbShowLines">
+           <property name="toolTip">
+            <string>Show connecting lines between data points</string>
+           </property>
+           <property name="text">
+            <string>Show lines</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QCheckBox" name="cbShowMarkers">
+           <property name="text">
+            <string>Show markers</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QCheckBox" name="cbShowGrid">
+           <property name="text">
+            <string>Show grid</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QCheckBox" name="cbAutoUpdate">
+           <property name="toolTip">
+            <string>Automatically scroll to show latest data points</string>
+           </property>
+           <property name="text">
+            <string>Auto-update view</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="horizontalSpacer">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btnSave">
+           <property name="minimumSize">
+            <size>
+             <width>150</width>
+             <height>0</height>
+            </size>
+           </property>
+           <property name="toolTip">
+            <string>Save currently shown view as SVG to folder /img</string>
+           </property>
+           <property name="styleSheet">
+            <string notr="true">background-color: rgb(200, 200, 200);</string>
+           </property>
+           <property name="text">
+            <string>Save figure</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>901</width>
+     <height>23</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menuSettings">
+    <property name="title">
+     <string>Settings</string>
+    </property>
+    <addaction name="menuChangeSteadyState"/>
+    <addaction name="menuChangeTimeZone"/>
+   </widget>
+   <widget class="QMenu" name="menuView">
+    <property name="title">
+     <string>View</string>
+    </property>
+    <widget class="QMenu" name="menuSpikes">
+     <property name="title">
+      <string>Spikes</string>
+     </property>
+     <addaction name="menuMarkSpikes"/>
+     <addaction name="menuRemoveSpikeMarkers"/>
+    </widget>
+    <addaction name="menuChangeAxesLimits"/>
+    <addaction name="menuSaveCurrentLimits"/>
+    <addaction name="menuChangeMarker"/>
+    <addaction name="menuSpikes"/>
+    <addaction name="menuDeleteDuplicateLines"/>
+    <addaction name="menuAdvancedLinestyleSettings"/>
+   </widget>
+   <widget class="QMenu" name="menuData">
+    <property name="enabled">
+     <bool>true</bool>
+    </property>
+    <property name="title">
+     <string>Data</string>
+    </property>
+    <addaction name="menuAddData"/>
+    <addaction name="menuNewData"/>
+    <addaction name="menuAverage"/>
+    <addaction name="menuRestore"/>
+   </widget>
+   <widget class="QMenu" name="menuTesting">
+    <property name="title">
+     <string>Testing</string>
+    </property>
+    <widget class="QMenu" name="menuTrigger_test_alarm">
+     <property name="title">
+      <string>Trigger test alarm</string>
+     </property>
+     <addaction name="menuTestWarning"/>
+     <addaction name="menuTestCritical"/>
+    </widget>
+    <addaction name="menuTrigger_test_alarm"/>
+   </widget>
+   <addaction name="menuSettings"/>
+   <addaction name="menuView"/>
+   <addaction name="menuData"/>
+   <addaction name="menuTesting"/>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+  <action name="menuChangeSteadyState">
+   <property name="text">
+    <string>Change steady state definition</string>
+   </property>
+  </action>
+  <action name="menuChangeTimeZone">
+   <property name="text">
+    <string>Change time zone</string>
+   </property>
+  </action>
+  <action name="menuChangeAxesLimits">
+   <property name="text">
+    <string>Set axes limits</string>
+   </property>
+  </action>
+  <action name="menuAddData">
+   <property name="text">
+    <string>Load additional data</string>
+   </property>
+   <property name="toolTip">
+    <string>Extend currently shown data by another set of data</string>
+   </property>
+  </action>
+  <action name="menuNewData">
+   <property name="text">
+    <string>Load new data</string>
+   </property>
+   <property name="toolTip">
+    <string>Discard currently shown data and load a new file</string>
+   </property>
+  </action>
+  <action name="menuChangeMarker">
+   <property name="text">
+    <string>Change marker style</string>
+   </property>
+  </action>
+  <action name="menuSaveCurrentLimits">
+   <property name="text">
+    <string>Save current axes limits</string>
+   </property>
+  </action>
+  <action name="menuMarkSpikes">
+   <property name="text">
+    <string>Place markers</string>
+   </property>
+  </action>
+  <action name="menuRemoveSpikeMarkers">
+   <property name="text">
+    <string>Remove markers</string>
+   </property>
+  </action>
+  <action name="menuAverage">
+   <property name="checkable">
+    <bool>false</bool>
+   </property>
+   <property name="text">
+    <string>Average</string>
+   </property>
+   <property name="toolTip">
+    <string>Average data points to smoothen graphs and improve performance</string>
+   </property>
+  </action>
+  <action name="menuRestore">
+   <property name="text">
+    <string>Restore</string>
+   </property>
+   <property name="toolTip">
+    <string>Revert averaging and restore all data points</string>
+   </property>
+  </action>
+  <action name="menuTestWarning">
+   <property name="text">
+    <string>Warning</string>
+   </property>
+  </action>
+  <action name="menuTestCritical">
+   <property name="text">
+    <string>Critical</string>
+   </property>
+  </action>
+  <action name="menuDeleteDuplicateLines">
+   <property name="text">
+    <string>Delete duplicate markings</string>
+   </property>
+  </action>
+  <action name="menuAdvancedLinestyleSettings">
+   <property name="text">
+    <string>Advanced line style settings</string>
+   </property>
+  </action>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
