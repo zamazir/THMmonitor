@@ -30,12 +30,15 @@ from dateutil import tz
 import datetime
 import bisect
 import ntpath
+import hkdata
+import struct
 try:
     import pygame
     pygameImported = True
 except ImportError:
     pygameImported = False
 from beaconconvert import *
+import mapping
 
 mpl.rcParams.update({'figure.autolayout': True})
 mpl.rcParams['svg.fonttype'] = 'none'
@@ -229,127 +232,19 @@ class AlarmThread(QtCore.QThread):
 
 
 class Sensor():
+    # Mapping should be provided before initializing instances via
+    # Sensor.mapping = dict
+    mapping = {}
     def __init__(self, name):
         self.name = name
-        self.mapping = {
-                'Battery 1':
-                    {'subsystem': 'EPS',
-                     'component': 'Battery'},
-                'Battery 2':
-                    {'subsystem': 'EPS',
-                     'component': 'Battery'},
-                'CDH':
-                    {'subsystem': 'CDH',
-                     'component': 'CDH'},
-                'EPS 1':
-                    {'subsystem': 'EPS',
-                     'component': 'EPS Board'},
-                'EPS 2':
-                    {'subsystem': 'EPS',
-                     'component': 'EPS Board'},
-                'Main Panel 1':
-                    {'subsystem': 'ADCS',
-                     'component': 'Main Panel'},
-                'Main Panel 2':
-                    {'subsystem': 'ADCS',
-                     'component': 'Main Panel'},
-                'Main Panel 3':
-                    {'subsystem': 'ADCS',
-                     'component': 'Main Panel'},
-                'Main Panel 4':
-                    {'subsystem': 'ADCS',
-                     'component': 'Main Panel'},
-                'S-Band 1':
-                    {'subsystem': 'COM',
-                     'component': 'S-Band'},
-                'S-Band 2':
-                    {'subsystem': 'COM',
-                     'component': 'S-Band'},
-                'S-Band 3':
-                    {'subsystem': 'COM',
-                     'component': 'S-Band'},
-                'Side Panel 1_1':
-                    {'subsystem': 'ADCS',
-                     'component': 'Side Panel 1'},
-                'Side Panel 1_2':
-                    {'subsystem': 'ADCS',
-                     'component': 'Side Panel 1'},
-                'Side Panel 1_3':
-                    {'subsystem': 'ADCS',
-                     'component': 'Side Panel 1'},
-                'Side Panel 1_4':
-                    {'subsystem': 'ADCS',
-                     'component': 'Side Panel 1'},
-                'Side Panel 2_1':
-                    {'subsystem': 'ADCS',
-                     'component': 'Side Panel 2'},
-                'Side Panel 2_2':
-                    {'subsystem': 'ADCS',
-                     'component': 'Side Panel 2'},
-                'Side Panel 2_3':
-                    {'subsystem': 'ADCS',
-                     'component': 'Side Panel 2'},
-                'Side Panel 2_4':
-                    {'subsystem': 'ADCS',
-                     'component': 'Side Panel 2'},
-                'Side Panel 3_1':
-                    {'subsystem': 'ADCS',
-                     'component': 'Side Panel 3'},
-                'Side Panel 3_2':
-                    {'subsystem': 'ADCS',
-                     'component': 'Side Panel 3'},
-                'Side Panel 3_3':
-                    {'subsystem': 'ADCS',
-                     'component': 'Side Panel 3'},
-                'Side Panel 3_4':
-                    {'subsystem': 'ADCS',
-                     'component': 'Side Panel 3'},
-                'Side Panel 4_1':
-                    {'subsystem': 'ADCS',
-                     'component': 'Side Panel 4'},
-                'Side Panel 4_2':
-                    {'subsystem': 'ADCS',
-                     'component': 'Side Panel 4'},
-                'Side Panel 4_3':
-                    {'subsystem': 'ADCS',
-                     'component': 'Side Panel 4'},
-                'Side Panel 4_4':
-                    {'subsystem': 'ADCS',
-                     'component': 'Side Panel 4'},
-                'Top Panel 1':
-                    {'subsystem': 'ADCS',
-                     'component': 'Top Panel'},
-                'Top Panel 2':
-                    {'subsystem': 'ADCS',
-                     'component': 'Top Panel'},
-                'Top Panel 3':
-                    {'subsystem': 'ADCS',
-                     'component': 'Top Panel'},
-                'Top Panel 4':
-                    {'subsystem': 'ADCS',
-                     'component': 'Top Panel'},
-                'Top Panel 5':
-                    {'subsystem': 'ADCS',
-                     'component': 'Top Panel'},
-                'Top Panel 6':
-                    {'subsystem': 'ADCS',
-                     'component': 'Top Panel'},
-                'UHF-VHF 1':
-                    {'subsystem': 'COM',
-                     'component': 'UHF-VHF'},
-                'UHF-VHF 2':
-                    {'subsystem': 'COM',
-                     'component': 'UHF-VHF'},
-                'UHF-VHF 3':
-                    {'subsystem': 'COM',
-                     'component': 'UHF-VHF'},
-                }
-        self.sensor2Component = {
-                sensor: map['component'] for sensor, map in self.mapping.iteritems()}
-        self.component2Subsystem = {
-                map['component']: map['subsystem'] for map in self.mapping.values()}
-        self.subsystem = self.mapping[name]['subsystem']
-        self.component = self.mapping[name]['component']
+        if name in self.mapping:
+            self.subsystem = self.mapping[name]['subsystem']
+            self.component = self.mapping[name]['component']
+        else:
+            print "No component/subsystem found for sensor {}. ".format(name)+\
+                    "Make sure this sensor has a mapping in the supplied mapping dict"
+            self.subsystem = 'None'
+            self.component = 'None'
         self.steady = False
         
 
@@ -527,7 +422,7 @@ class updateThread(QtCore.QThread):
         """
         Adds data from `file` to existing data or overwrites existing data.
         Delegates reading and interpretation to `dataFromFile` and plotting to
-        `processFileData`
+        `process[]FileData`
 
         Receives:
             Python file object      file    File containing the data to be
@@ -539,10 +434,83 @@ class updateThread(QtCore.QThread):
         data = self.dataFromFile(file)
         if purge:
             self.emit(SIGNAL('discard_data()'))
-        self.processFileData(data, purge, oldData)
+        if oldFormat:
+            self.processOldFileData(data, purge, oldData)
+        else:
+            self.processBinaryFileData(data, purge, oldData)
 
 
-    def dataFromFile(self, file):
+    def convert(self, fileContents):
+        """ Largely adapted from OPS_housekeeping thm_processor """
+	if len(fileContents) != hkdata.getTotalBytes():
+            return 'wrong_dim'
+
+        #data = {}
+        data = []
+        start = 0
+        end = 0
+
+        sensorInfo = hkdata.thm_bytes
+        totalBytes = hkdata.getTotalBytes()
+        time = 0
+        for info in sensorInfo:
+            sensorName = info[0]
+            format     = info[1]
+            interpFunc = info[2]
+            sensorID   = info[3]
+
+            bytecount = struct.calcsize(format)
+            start = end
+            end = start + bytecount
+
+            rawin = fileContents[start:end]
+            if end > totalBytes:
+                rawin = fileContents[start:]
+
+            if len(rawin) < bytecount:
+                return data
+            
+            rawout = struct.unpack(format, rawin)[0]
+
+            if interpFunc is None:
+                # (raw value, interpreted value, sensorId)
+                #data[sensorName] = (rawout, rawout, sensorID)
+                data.append([sensorName, time, rawout])
+            else:
+                #data[sensorName] = (rawout, interpFunc(rawout), sensorID)
+                data.append([sensorName, time, interpFunc(rawout)])
+        
+        timestamp = next((d[2] for d in data if d[0] == "Timestamp"),None)
+        if timestamp is None:
+            print "CRITICAL: Could not find timestamp in data"
+        else:
+            time = mpl.dates.epoch2num(timestamp)
+
+            # Set correct time for each sensor
+            for i, sensorData in enumerate(data):
+                data[i][1] = time
+
+            # Remove invalid "Sensors"
+            for sensorData in data:
+                sensorName = sensorData[0]
+                if sensorName == "Timestamp" or sensorName == "Status":
+                    data.remove(sensorData)
+
+            # Split by Line terminator
+            dataByTimestamp = []
+            timestampData = []
+            for sensorData in data:
+                sensorName = sensorData[0]
+                if sensorName == "Line terminator":
+                    dataByTimestamp.append(timestampData)
+                    timestampData = []
+                else:
+                    timestampData.append(sensorData)
+
+	return dataByTimestamp
+
+
+    def dataFromFile(self, fileName):
         """
         Reads a journald log file and casts the contents to `interpretTHM`.
 
@@ -552,11 +520,20 @@ class updateThread(QtCore.QThread):
             list                    data    Interpreted temperature data as
                                             provided by `interpretTHM`
         """
-        data = []
-        with open(file, 'r') as f:
-            for line in f.readlines():
-                line = line.split()
-                data.append(self.interpretTHM(line, stringify=False))
+        # This was adapted from OPS_housekeeping thm_processor
+        with open(fileName, 'rb') as f:
+            fileContents = f.read(hkdata.getTotalBytes())
+        data = self.convert(fileContents)
+        for el in data:
+            for sensorData in el:
+                if sensorData[0] == 'Status':
+                    el.remove(sensorData)
+        # This was used to read plain text files
+        #data = []
+        #with open(file, 'r') as f:
+        #    for line in f.readlines():
+        #        line = line.split()
+        #        data.append(self.interpretTHM(line, stringify=False))
         return data
 
 
@@ -830,6 +807,9 @@ class Monitor(QMainWindow, Ui_MainWindow):
 
         self.window.fig.set_facecolor('#999999')
         self.window.canvas.draw()
+
+        # Make sensors aware of subsystem mapping
+        Sensor.mapping = mapping.mapping
 
         self.alarmThread = AlarmThread()
 
@@ -1481,46 +1461,46 @@ class Monitor(QMainWindow, Ui_MainWindow):
             table.setCellWidget(rowPos, 0, cb)
 
         # Add components
-        components = sorted(list(set([sensor.component for sensor in sensors])))
-        for component in components:
-            sub = sensor.component2Subsystem[component]
-            itemList = table.findItems(sub, QtCore.Qt.MatchExactly)
-            # Check if the found subsystem name is in column 1. 
-            # Important in case there is a component that has the name of a subsystem.
-            # If there is more than one subsystem with the same name, choose
-            # the first one
-            for item in itemList:
-                if item.column() == 1:
-                    rowPos = item.row() + 1
-                    break
-            table.insertRow(rowPos)
-            rowCount += 1
-            
-            # Checkboxes
-            cb = QtGui.QCheckBox()
-            self.checkBoxes['component' + component] = cb
-            
-            # Make checkboxes 0 or 1 only and check them
-            cb.setTristate(False)
-            cb.setChecked(True)
-            cb.setMaximumWidth(20)
-            cb.stateChanged.connect(
-                    functools.partial(self.toggleComponent, component, cb))
-            cb.setStyleSheet('QCheckBox {background-color: rgb(153,153,153)}')
-            cb.setToolTip(
-                    '<span style="color:black;">Toggle all sensors in this component</span>')
+        for subsystem in subsystems:
+            components = sorted(list(set([s.component for s in sensors if s.subsystem==subsystem])))
+            for component in components:
+                itemList = table.findItems(subsystem, QtCore.Qt.MatchExactly)
+                # Check if the found subsystem name is in column 1. 
+                # Important in case there is a component that has the name of a subsystem.
+                # If there is more than one subsystem with the same name, choose
+                # the first one
+                for item in itemList:
+                    if item.column() == 1:
+                        rowPos = item.row() + 1
+                        break
+                table.insertRow(rowPos)
+                rowCount += 1
+                
+                # Checkboxes
+                cb = QtGui.QCheckBox()
+                self.checkBoxes['component' + component] = cb
+                
+                # Make checkboxes 0 or 1 only and check them
+                cb.setTristate(False)
+                cb.setChecked(True)
+                cb.setMaximumWidth(20)
+                cb.stateChanged.connect(
+                        functools.partial(self.toggleComponent, component, cb))
+                cb.setStyleSheet('QCheckBox {background-color: rgb(153,153,153)}')
+                cb.setToolTip(
+                        '<span style="color:black;">Toggle all sensors in this component</span>')
 
-            # Component names
-            item = QtGui.QTableWidgetItem()
-            item.setText(component)
-            item.setBackground(QtCore.Qt.white)
-            item.setTextColor(QtCore.Qt.black)
-            font = QtGui.QFont()
-            font.setBold(True)
-            item.setFont(font)
-            table.setItem(rowPos, 2, item)
+                # Component names
+                item = QtGui.QTableWidgetItem()
+                item.setText(component)
+                item.setBackground(QtCore.Qt.white)
+                item.setTextColor(QtCore.Qt.black)
+                font = QtGui.QFont()
+                font.setBold(True)
+                item.setFont(font)
+                table.setItem(rowPos, 2, item)
 
-            table.setCellWidget(rowPos, 0, cb)
+                table.setCellWidget(rowPos, 0, cb)
         
 
         # Add sensors
@@ -1529,13 +1509,20 @@ class Monitor(QMainWindow, Ui_MainWindow):
         for i, sensor in enumerate(sensors):
             self.trackProgress(size, i, 'Populating sensor table (sensor {} of {})'.format(i,size))
 
+            # First find the subsystem and memorize row.
+            itemList = table.findItems(sensor.subsystem, QtCore.Qt.MatchExactly)
+            for item in itemList:
+                if item.column() == 1:
+                    subsystemRow = item.row()
+                    break
             itemList = table.findItems(sensor.component, QtCore.Qt.MatchExactly)
             # Check if the found component name is in column 2. 
             # Important in case there is a sensor that has the name of
             # a component or subsystem.  If there is more than one component
             # with the same name, choose the first one.
+            # Also, only consider components below this subsystem
             for item in itemList:
-                if item.column() == 2:
+                if item.column() == 2 and item.row() > subsystemRow:
                     rowPos = item.row() +1
                     break
             table.insertRow(rowPos)
@@ -1672,6 +1659,7 @@ class Monitor(QMainWindow, Ui_MainWindow):
 
     def stopFeed(self):
         self.window.stahp()
+
 
 
 class Combo(QtGui.QComboBox):
@@ -1920,7 +1908,7 @@ class MplLinestyleDialog(QtGui.QDialog):
         try:
             isHex = pyqtColor.startswith('#')
         except AttributeError:
-            print "Could not convert color", pyqtColor
+            pass
 
         if isHex:
             color = mpl.colors.colorConverter.to_rgb(pyqtColor)
@@ -2627,12 +2615,18 @@ class Window(QtCore.QObject):
                 'ADCS': 'gist_rainbow',
                 'CDH':  'summer',
                 'COM':  'autumn',
+                'Payload':  'inferno',
                 'EPS':  'winter'}
 
         for sensor in self.sensors:
             sub = sensor.subsystem
             sensorsInSub = len([s for s in self.sensors if s.subsystem == sub])
-            colormap = getattr(cm, self.colormaps[sub])
+            if sub in self.colormaps:
+                colormap = getattr(cm, self.colormaps[sub])
+            else:
+                print "No colormap specified for subsystem {}. ".format(sub)+\
+                        "Using gist_rainbow."
+                colormap = getattr(cm, 'gist_rainbow')
             colorsBySubsystem[sub] = colormap(np.linspace(0,1,sensorsInSub))
 
         self.colors = {}
@@ -2914,7 +2908,16 @@ class Window(QtCore.QObject):
         dateFmtMajor, dateFmtMinor = self.getDateFormat(xmin, xmax)
         self.ax.xaxis.set_major_formatter(dateFmtMajor)
         self.ax.xaxis.set_minor_formatter(dateFmtMinor)
-        self.fig.autofmt_xdate()
+        try:
+            self.fig.autofmt_xdate()
+        except RuntimeError:
+            locator = mpl.dates.AutoDateLocator()
+            self.ax.xaxis.set_minor_locator(locator)
+            self.ax.xaxis.set_major_locator(locator)
+            dateFmt = mpl.dates.AutoDateFormatter(locator)
+            self.ax.xaxis.set_major_formatter(dateFmt)
+            self.ax.xaxis.set_minor_formatter(dateFmt)
+            self.fig.autofmt_xdate()
 
 
     def getDateFormat(self, xmin, xmax):
