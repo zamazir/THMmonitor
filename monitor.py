@@ -429,7 +429,7 @@ class updateThread(QtCore.QThread):
         """
         Adds data from `file` to existing data or overwrites existing data.
         Delegates reading and interpretation to `dataFromFile` and plotting to
-        `process[]FileData`
+        `processFileData`
 
         Receives:
             Python file object      file    File containing the data to be
