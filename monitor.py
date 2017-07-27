@@ -441,10 +441,8 @@ class updateThread(QtCore.QThread):
         data = self.dataFromFile(file)
         if purge:
             self.emit(SIGNAL('discard_data()'))
-        if oldFormat:
-            self.processOldFileData(data, purge, oldData)
-        else:
-            self.processBinaryFileData(data, purge, oldData)
+        
+        self.processFileData(data, purge, oldData)
 
 
     def convert(self, fileContents):
@@ -2082,7 +2080,8 @@ class Monitor(QMainWindow, Ui_MainWindow):
 
     def receiveDuplicates(self, dups):
         print "Received duplicates:", dups
-        self.window.dups = dups
+        self.window.dups.extend(dups)
+        self.window.dups = list(set(self.window.dups))
         
 
     def markDuplicates(self):
