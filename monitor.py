@@ -1,8 +1,18 @@
 # -*- coding: utf-8 -*-
-import matplotlib as mpl
-mpl.use('Qt4Agg')
 
+##############################################################################
+# Imports
+##############################################################################
+# Native libraries
+import sys
+import os
 import logging
+import time
+import datetime
+import bisect
+import ntpath
+import struct
+import functools
 logging.basicConfig(
                 filename='monitor.log', 
                 filemode='a', 
@@ -11,39 +21,46 @@ logging.basicConfig(
                 level=logging.ERROR)
 logging.info('\n++++++++++++++ Program started +++++++++++++++++')
 
-# include parent folder in pythonpath
-import sys
-import os
+# Third party libraries
 #sys.path.insert(1, os.path.join(sys.path[0], '..'))
+import numpy as np
+from dateutil import tz
+import matplotlib as mpl
+mpl.use('Qt4Agg')
 from matplotlib.figure import Figure
-from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
+from matplotlib.backends.backend_qt4agg import (FigureCanvasQTAgg 
+                                                as FigureCanvas)
+from matplotlib.backends.backend_qt4agg import (NavigationToolbar2QT 
+                                                as NavigationToolbar)
 from matplotlib import cm
-from PyQt4 import QtGui, QtCore
+from PyQt4 import QtGui
+from PyQt4 import QtCore
 from PyQt4.QtCore import (SIGNAL, QRect, pyqtSlot, pyqtSignal)
 from PyQt4.uic import loadUiType
-from PyQt4.QtGui import (QStyle, QHeaderView, QStyleOptionButton, QPainter, QColor, QSizePolicy)
-import time
-import numpy as np
-import functools
-from dateutil import tz
-import datetime
-import bisect
-import ntpath
-import hkdata
-import struct
+from PyQt4.QtGui import (QStyle, QHeaderView, QStyleOptionButton, QPainter, 
+                         QColor, QSizePolicy)
 try:
     import pygame
     pygameImported = True
 except ImportError:
     pygameImported = False
-from beaconconvert import *
+
+# Project libraries
+import ops.hkdata as hkdata
+from ops.beaconconvert import *
 import mapping
 
+
+##############################################################################
+# Matplotlib parameters
+##############################################################################
 mpl.rcParams.update({'figure.autolayout': True})
 mpl.rcParams['svg.fonttype'] = 'none'
 
 
+##############################################################################
+# Argument Parsing
+##############################################################################
 modes = ['simulation','tvac']
 args = sys.argv
 fileMode = False
@@ -59,12 +76,20 @@ if len(args) >= 2:
 else:
     print "TVAC mode"
     mode = 'tvac'
-    logging.info("Received no mode as command line argument. Assuming tvac".format(mode)) 
+    logging.info("Received no mode as command line argument. "
+                 + "Assuming tvac mode")
 
 
+
+##############################################################################
+# Load UI
+##############################################################################
 Ui_MainWindow, QMainWindow = loadUiType('monitor.ui')
 
- 
+
+##############################################################################
+# Threads
+##############################################################################
 class DataFrequencyThread(QtCore.QThread):
     def __init__(self, gui, updatethread):
         super(DataFrequencyThread, self).__init__()
@@ -112,7 +137,7 @@ class DataFrequencyThread(QtCore.QThread):
 
         self.periods = periods
         try:
-            if periods[-1] > 3*max(periods):
+            if periods[-1] > 3*np.mean(periods):
                 self.emit(SIGNAL('beacon_gap_event(PyQt_PyObject)'), lastBeaconTime)
         except IndexError:
             pass
@@ -231,24 +256,6 @@ class AlarmThread(QtCore.QThread):
 
 
 
-class Sensor():
-    # Mapping should be provided before initializing instances via
-    # Sensor.mapping = dict
-    mapping = {}
-    def __init__(self, name):
-        self.name = name
-        if name in self.mapping:
-            self.subsystem = self.mapping[name]['subsystem']
-            self.component = self.mapping[name]['component']
-        else:
-            print "No component/subsystem found for sensor {}. ".format(name)+\
-                    "Make sure this sensor has a mapping in the supplied mapping dict"
-            self.subsystem = 'None'
-            self.component = 'None'
-        self.steady = False
-        
-
-
 class updateThread(QtCore.QThread):
     """
     This thread is responsible for any data aquisition and processing
@@ -273,79 +280,79 @@ class updateThread(QtCore.QThread):
         time.sleep(5)
 
 
-    def interpretTHM(self, data, stringify=True):
-        """
-        Interprets THM temperature data corresponding to the respective sensor.
-        `data` must be a list of lists as obtained by reading the journald file
-        and splitting each line. Each list element is then a list of one
-        timestamp and the sensor values at that time.
-        Set stringify=True when in live mode.
+    #def interpretTHM(self, data, stringify=True):
+    #    """
+    #    Interprets THM temperature data corresponding to the respective sensor.
+    #    `data` must be a list of lists as obtained by reading the journald file
+    #    and splitting each line. Each list element is then a list of one
+    #    timestamp and the sensor values at that time.
+    #    Set stringify=True when in live mode.
 
-        Receives:
-            list    data        Temperature data to be interpreted
-            boolean stringify   Whether or not to return the result as a string
+    #    Receives:
+    #        list    data        Temperature data to be interpreted
+    #        boolean stringify   Whether or not to return the result as a string
 
-        Returns:
-            list    data        Interpreted temperature data
-        """
-        # Make sure data are int
-        data = [eval(el) for el in data]
+    #    Returns:
+    #        list    data        Interpreted temperature data
+    #    """
+    #    # Make sure data are int
+    #    data = [eval(el) for el in data]
 
-        # Fix endian
-        # This was necessary with the old version of beaconconvert.py
-        #switchEndian = lambda x: struct.unpack('<h', struct.pack('>h', x))[0]
-        #data = [switchEndian(el) if i!=0 else el for i, el in enumerate(data)]
+    #    # Fix endian
+    #    # This was necessary with the old version of beaconconvert.py
+    #    #switchEndian = lambda x: struct.unpack('<h', struct.pack('>h', x))[0]
+    #    #data = [switchEndian(el) if i!=0 else el for i, el in enumerate(data)]
 
-        timestamp = mpl.dates.epoch2num(data[0])
-        data = [
-                ['Battery 1', timestamp, interpretKelvinToCelsius(data[29])],
-                ['Battery 2', timestamp , interpretKelvinToCelsius(data[30])],
-                ['CDH', timestamp, interpretNoChange(data[38])],
-                ['EPS 1', timestamp , interpretKelvinToCelsius(data[28])],
-                ['EPS 2', timestamp , interpretKelvinToCelsius(data[31])],
-                ['Main Panel 1', timestamp, interpretBMX055(data[24])],
-                ['Main Panel 2', timestamp, interpretDS18B20(data[25])],
-                ['Main Panel 3', timestamp, interpretDS18B20(data[26])],
-                ['Main Panel 4', timestamp, interpretDS18B20(data[27])],
-                ['S-Band 1', timestamp, interpretUnknownCOMSensor(data[32])],
-                ['S-Band 2', timestamp, interpretMCP9802(data[33])],
-                ['S-Band 3', timestamp, interpretEMC1701(data[34])],
-                ['Side Panel 1_1', timestamp, interpretBMX055(data[8])],
-                ['Side Panel 1_2', timestamp, interpretDS18B20(data[9])],
-                ['Side Panel 1_3', timestamp, interpretDS18B20(data[10])],
-                ['Side Panel 1_4', timestamp, interpretDS18B20(data[11])],
-                ['Side Panel 2_1', timestamp, interpretBMX055(data[12])],
-                ['Side Panel 2_2', timestamp, interpretDS18B20(data[13])],
-                ['Side Panel 2_3', timestamp, interpretDS18B20(data[14])],
-                ['Side Panel 2_4', timestamp, interpretDS18B20(data[15])],
-                ['Side Panel 3_1', timestamp, interpretBMX055(data[16])],
-                ['Side Panel 3_2', timestamp, interpretDS18B20(data[17])],
-                ['Side Panel 3_3', timestamp, interpretDS18B20(data[18])],
-                ['Side Panel 3_4', timestamp, interpretDS18B20(data[19])],
-                ['Side Panel 4_1', timestamp, interpretBMX055(data[20])],
-                ['Side Panel 4_2', timestamp, interpretDS18B20(data[21])],
-                ['Side Panel 4_3', timestamp, interpretDS18B20(data[22])],
-                ['Side Panel 4_4', timestamp, interpretDS18B20(data[23])],
-                ['Top Panel 1', timestamp, interpretNoChange(data[2])],
-                ['Top Panel 2', timestamp, interpretNoChange(data[3])],
-                ['Top Panel 3', timestamp, interpretNoChange(data[4])],
-                ['Top Panel 4', timestamp, interpretNoChange(data[5])],
-                ['Top Panel 5', timestamp, interpretNoChange(data[6])],
-                ['Top Panel 6', timestamp, interpretNoChange(data[7])],
-                ['UHF-VHF 1', timestamp, interpretMCP9802(data[35])],
-                ['UHF-VHF 2', timestamp, interpretLT55599(data[36])],
-                ['UHF-VHF 3', timestamp, interpretEMC1701(data[37])],
-                ['THM System State', timestamp, interpretNoChange(data[1])]
-            ]
+    #    timestamp = mpl.dates.epoch2num(data[0])
+    #    data = [
+    #            ['Battery 1', timestamp, interpretKelvinToCelsius(data[29])],
+    #            ['Battery 2', timestamp , interpretKelvinToCelsius(data[30])],
+    #            ['CDH', timestamp, interpretNoChange(data[38])],
+    #            ['EPS 1', timestamp , interpretKelvinToCelsius(data[28])],
+    #            ['EPS 2', timestamp , interpretKelvinToCelsius(data[31])],
+    #            ['Main Panel 1', timestamp, interpretBMX055(data[24])],
+    #            ['Main Panel 2', timestamp, interpretDS18B20(data[25])],
+    #            ['Main Panel 3', timestamp, interpretDS18B20(data[26])],
+    #            ['Main Panel 4', timestamp, interpretDS18B20(data[27])],
+    #            ['S-Band 1', timestamp, interpretUnknownCOMSensor(data[32])],
+    #            ['S-Band 2', timestamp, interpretMCP9802(data[33])],
+    #            ['S-Band 3', timestamp, interpretEMC1701(data[34])],
+    #            ['Side Panel 1_1', timestamp, interpretBMX055(data[8])],
+    #            ['Side Panel 1_2', timestamp, interpretDS18B20(data[9])],
+    #            ['Side Panel 1_3', timestamp, interpretDS18B20(data[10])],
+    #            ['Side Panel 1_4', timestamp, interpretDS18B20(data[11])],
+    #            ['Side Panel 2_1', timestamp, interpretBMX055(data[12])],
+    #            ['Side Panel 2_2', timestamp, interpretDS18B20(data[13])],
+    #            ['Side Panel 2_3', timestamp, interpretDS18B20(data[14])],
+    #            ['Side Panel 2_4', timestamp, interpretDS18B20(data[15])],
+    #            ['Side Panel 3_1', timestamp, interpretBMX055(data[16])],
+    #            ['Side Panel 3_2', timestamp, interpretDS18B20(data[17])],
+    #            ['Side Panel 3_3', timestamp, interpretDS18B20(data[18])],
+    #            ['Side Panel 3_4', timestamp, interpretDS18B20(data[19])],
+    #            ['Side Panel 4_1', timestamp, interpretBMX055(data[20])],
+    #            ['Side Panel 4_2', timestamp, interpretDS18B20(data[21])],
+    #            ['Side Panel 4_3', timestamp, interpretDS18B20(data[22])],
+    #            ['Side Panel 4_4', timestamp, interpretDS18B20(data[23])],
+    #            ['Top Panel 1', timestamp, interpretNoChange(data[2])],
+    #            ['Top Panel 2', timestamp, interpretNoChange(data[3])],
+    #            ['Top Panel 3', timestamp, interpretNoChange(data[4])],
+    #            ['Top Panel 4', timestamp, interpretNoChange(data[5])],
+    #            ['Top Panel 5', timestamp, interpretNoChange(data[6])],
+    #            ['Top Panel 6', timestamp, interpretNoChange(data[7])],
+    #            ['UHF-VHF 1', timestamp, interpretMCP9802(data[35])],
+    #            ['UHF-VHF 2', timestamp, interpretLT55599(data[36])],
+    #            ['UHF-VHF 3', timestamp, interpretEMC1701(data[37])],
+    #            ['THM System State', timestamp, interpretNoChange(data[1])]
+    #        ]
 
-        if stringify:
-            data = str(data)
-        return data
+    #    if stringify:
+    #        data = str(data)
+    #    return data
 
 
     def processFileData(self, data, purge=False, oldData={}):
         """
-        Organizes journald THM file contents into a dictionary with sensor nmes
+        Organizes journald THM file contents into a dictionary with sensor names
         as keys and tuples of x and y data numpy arrays as values. Ushers
         signal to trigger plotting of the data.
 
@@ -377,7 +384,8 @@ class updateThread(QtCore.QThread):
                 newx    = sensorData[1]
                 newy    = sensorData[2]
 
-                if sensor == 'THM System State':
+                # When plotting from file, system state not relevant
+                if sensor in ('THM System State','State','Status'):
                     continue
 
                 x, y = plotData.get(sensor, (np.zeros(0),np.zeros(0)))
@@ -394,7 +402,6 @@ class updateThread(QtCore.QThread):
                                 .format(sensor, date, time) +\
                                 "Old: {}, New: {}.".format(y[ind], newy)
                         dups.append(newx)
-                #else:
                 newx = np.array([newx])
                 newy = np.array([newy])
                 x = np.concatenate((x,newx))
@@ -442,72 +449,66 @@ class updateThread(QtCore.QThread):
 
     def convert(self, fileContents):
         """ Largely adapted from OPS_housekeeping thm_processor """
-	if len(fileContents) != hkdata.getTotalBytes():
-            return 'wrong_dim'
-
-        #data = {}
-        data = []
-        start = 0
-        end = 0
-
         sensorInfo = hkdata.thm_bytes
         totalBytes = hkdata.getTotalBytes()
         time = 0
-        for info in sensorInfo:
-            sensorName = info[0]
-            format     = info[1]
-            interpFunc = info[2]
-            sensorID   = info[3]
+        data = []
+        size = len(fileContents)
+        self.track.emit()
+        for i, line in enumerate(fileContents):
+            self.progress.emit(size, i, 
+                    'Reading binary data (line {} of {})'.format(i,size))
+            if len(line) != totalBytes:
+                logging.error(
+                    "Line contents don't match sensor byte count ({}): Line {}"
+                     .format(totalBytes,i))
+                continue
+            lineData = []
+            start = 0
+            end = 0
 
-            bytecount = struct.calcsize(format)
-            start = end
-            end = start + bytecount
+            for info in sensorInfo:
+                sensorName = info[0]
+                format     = info[1]
+                interpFunc = info[2]
+                sensorID   = info[3]
 
-            rawin = fileContents[start:end]
-            if end > totalBytes:
-                rawin = fileContents[start:]
+                bytecount = struct.calcsize(format)
+                start = end
+                end = start + bytecount
 
-            if len(rawin) < bytecount:
-                return data
-            
-            rawout = struct.unpack(format, rawin)[0]
+                rawin = line[start:end]
+                if end > totalBytes:
+                    rawin = line[start:]
 
-            if interpFunc is None:
-                # (raw value, interpreted value, sensorId)
-                #data[sensorName] = (rawout, rawout, sensorID)
-                data.append([sensorName, time, rawout])
-            else:
-                #data[sensorName] = (rawout, interpFunc(rawout), sensorID)
-                data.append([sensorName, time, interpFunc(rawout)])
-        
-        timestamp = next((d[2] for d in data if d[0] == "Timestamp"),None)
-        if timestamp is None:
-            print "CRITICAL: Could not find timestamp in data"
-        else:
-            time = mpl.dates.epoch2num(timestamp)
+                if len(rawin) < bytecount:
+                    logging.error("Error interpreting {} in Line {}: "
+                                    .format(sensorName,i)
+                                   + "Raw value {} has smaller length than expected bytecount {} "
+                                      .format(rawin,bytecount)
+                                   + "and could not be interpreted")
+                    break
+                
+                rawout = struct.unpack(format, rawin)[0]
 
-            # Set correct time for each sensor
-            for i, sensorData in enumerate(data):
-                data[i][1] = time
+                # This will only work reliably if the timestamp is the first
+                # value
+                if sensorName == 'Timestamp':
+                    time = mpl.dates.epoch2num(rawout)
+                    continue
 
-            # Remove invalid "Sensors"
-            for sensorData in data:
-                sensorName = sensorData[0]
-                if sensorName == "Timestamp" or sensorName == "Status":
-                    data.remove(sensorData)
+                if sensorName == 'Line terminator':
+                    continue
 
-            # Split by Line terminator
-            dataByTimestamp = []
-            timestampData = []
-            for sensorData in data:
-                sensorName = sensorData[0]
-                if sensorName == "Line terminator":
-                    dataByTimestamp.append(timestampData)
-                    timestampData = []
+                if interpFunc is None:
+                    lineData.append([sensorName, time, rawout])
                 else:
-                    timestampData.append(sensorData)
+                    lineData.append([sensorName, time, interpFunc(rawout)])
+            
+            data.append(lineData)
+        self.done.emit()
 
-	return dataByTimestamp
+	return data
 
 
     def dataFromFile(self, fileName):
@@ -515,19 +516,15 @@ class updateThread(QtCore.QThread):
         Reads a journald log file and casts the contents to `interpretTHM`.
 
         Receives:
-            Python file object      file    File to be read
+            string      fileName    File to be read
         Returns:
-            list                    data    Interpreted temperature data as
-                                            provided by `interpretTHM`
+            list        data        Interpreted temperature data as
+                                    provided by `interpretTHM`
         """
         # This was adapted from OPS_housekeeping thm_processor
         with open(fileName, 'rb') as f:
-            fileContents = f.read(hkdata.getTotalBytes())
+            fileContents = f.readlines()
         data = self.convert(fileContents)
-        for el in data:
-            for sensorData in el:
-                if sensorData[0] == 'Status':
-                    el.remove(sensorData)
         # This was used to read plain text files
         #data = []
         #with open(file, 'r') as f:
@@ -555,7 +552,6 @@ class updateThread(QtCore.QThread):
         global fileMode
 
         if fileMode:
-            print "Input from file"
             data = self.dataFromFile(mode)
             self.processFileData(data)
             return
@@ -590,160 +586,1351 @@ class updateThread(QtCore.QThread):
                 
 
 
-class MyHeader(QHeaderView):
-    """
-    QHeaderView subclass featuring a master checkbox 
-    """
-    isOn = True
+##############################################################################
+# Dialogs
+##############################################################################
+class MplLinestyleDialog(QtGui.QDialog):
+    def __init__(self, parent=None, plotFamilies=None, colormaps=None):
+        """
+        plotFamilies must be in the format
+            plotFamilies = {
+                'familyName1': {
+                    plot1, plot2, plot3, ...},
+                'familyName2': {
+                    plot1, plot2, plot3, ...},
+                ...}
+        Where plotx is an object with the attributes
+            - name
+            - linestyle
+            - linewidth
+            - marker
+            - color
+            - colormap
+        colormaps must be in the format
+            colormaps = {
+                'familyName1': 'colormap1',
+                ...}
+        """
+        super(MplLinestyleDialog,self).__init__(parent)
 
-    def __init__(self, orientation, labels, gui):
-        parent = gui.sensorTable
-        QHeaderView.__init__(self, orientation, parent)
-        self.gui = gui
-        self.labels = labels
+        self.oldStyle   = {}
+        self.families   = plotFamilies
+        self.combos        = []
+        self.comboColormaps= {}
+        self.colorPatches  = {}
+        self.newStyle      = {}
+        self.attributes = ('linestyle','linewidth','color',
+                            'colormap','marker')
 
+        mainLayout       = QtGui.QVBoxLayout()
+        scrollContainer  = QtGui.QScrollArea()
+        familyContainer  = QtGui.QWidget()
+        self.familyLayout= QtGui.QGridLayout()
+        btnResetAll      = QtGui.QPushButton('Revert changes')
+        currentRow       = 0
+        familyNames      = sorted(plotFamilies.keys())
 
-    def paintSection(self, painter, rect, logicalIndex):
-        painter.save()
-        color = QtGui.QColor(153,153,153)
-        QHeaderView.paintSection(self, painter, rect, logicalIndex)
-        painter.restore()
-        painter.fillRect(rect, QtGui.QBrush(color))
-        pen = QtGui.QPen(QtCore.Qt.white)
-        painter.setPen(pen)
-        font = QtGui.QFont('Helvetica', 10, QtGui.QFont.Bold)
-        painter.setFont(font)
-        textRect = QtCore.QRectF(rect.x()+10,rect.y(),rect.height(),rect.width())
-        painter.drawText(rect, QtCore.Qt.AlignLeft, self.labels[logicalIndex])
+        self.familyLayout.addWidget(QtGui.QLabel('Global'), currentRow, 0)
+        self.addAttributeCombo('linestyle', (currentRow,2), isGlobal=True)
+        self.addAttributeCombo('linewidth', (currentRow,3), isGlobal=True)
+        self.addAttributeCombo('marker', (currentRow,4), isGlobal=True)
+        currentRow += 1
 
-        if logicalIndex == 0:
-            option = QStyleOptionButton()
-            option.rect = QRect(0, 7, 10, 10)
-            if self.isOn:
-                option.state = QStyle.State_On
-            else:
-                option.state = QStyle.State_Off
-            self.style().drawControl(QStyle.CE_CheckBox, option, painter)
-            self.option = option
+        for familyName in familyNames:
+            plotFamily   = plotFamilies[familyName]
+            lblFamily    = QtGui.QLabel(familyName)
 
+            self.familyLayout.addWidget(lblFamily, currentRow, 0, 1, 2)
+            self.familyLayout.addWidget(QtGui.QLabel('Color'), currentRow, 1)
+            self.familyLayout.addWidget(QtGui.QLabel('Linestyle'), currentRow, 2, 1, 2)
+            self.familyLayout.addWidget(QtGui.QLabel('Linewidth'), currentRow, 3, 1, 2)
+            self.familyLayout.addWidget(QtGui.QLabel('Marker'), currentRow, 4, 1, 2)
+            currentRow += 1
 
-    def mousePressEvent(self, event):
-        x = event.pos().x()
-        y = event.pos().y()
-        inxRange = 5 < x < 17
-        inyRange = 7 < y < 21
-        if inxRange and inyRange:
-            self.isOn = not self.isOn
-            self.updateSection(0)
-            QHeaderView.mousePressEvent(self, event)
-            self.gui.toggleAllPlots(self.isOn)
+            self.addAttributeCombo('linestyle', (currentRow,2), familyName, familywide=True)
+            self.addAttributeCombo('linewidth', (currentRow,3), familyName, familywide=True)
+            self.addAttributeCombo('marker', (currentRow,4), familyName, familywide=True)
 
-
-
-class Plot():
-    def __init__(self, line, name, colormap):
-        self.name  = str(name)
-        self.colormap = str(colormap)
-        self.color = mpl.colors.colorConverter.to_rgb(mpl.artist.getp(line, 'color'))
-        self.linestyle    = str(mpl.artist.getp(line, 'linestyle'))
-        self.linewidth    = str(int(mpl.artist.getp(line, 'linewidth')))
-        self.marker= str(mpl.artist.getp(line, 'marker'))
-
-
-
-class ThresholdPicker():
-    """
-        Threshold picker
-    """
-    def __init__(self, gui):
-        self.window = gui.window
-        self.gui = gui
-        self.threshLines = []
-        self.thresholds = []
-        self.crossVert  = None
-        self.crossHor   = None
-        #self.gui.deactivatePanZoom()
-        self._getter = self.window.fig.canvas.mpl_connect('button_press_event', self.getThresh)
-        self._setter = self.window.fig.canvas.mpl_connect('key_press_event', self.setThresh)
-        self._cursorSetter = self.window.fig.canvas.mpl_connect('axes_enter_event', self.setCursor)
-
+            colormap = colormaps[familyName]
+            self.addAttributeCombo('colormap', (currentRow,1), familyName, colormap)
+            currentRow += 1
+            
+            plotFamily = sorted(plotFamily, key= lambda x: x.name)
+            for plot in plotFamily:
+                self.addPlotName((currentRow,0), plot.name)
+                self.addColorPatch((currentRow,1), plot.name, plot.color)
+                self.addAttributeCombo('linestyle', (currentRow,2), plot.name, plot.linestyle)
+                self.addAttributeCombo('linewidth', (currentRow,3), plot.name, plot.linewidth)
+                self.addAttributeCombo('marker', (currentRow,4), plot.name, plot.marker)
+                currentRow += 1
+                
+            self.familyLayout.addWidget(QtGui.QWidget(), currentRow, 0)
+            currentRow += 1
         
-    def __del__(self):
-        self.window.fig.canvas.mpl_disconnect(self._getter)
-        self.window.fig.canvas.mpl_disconnect(self._setter)
-        self.window.fig.canvas.mpl_disconnect(self._cursorSetter)
+        btnResetAll.clicked.connect(self.reset)
+
+        buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok
+                | QtGui.QDialogButtonBox.Cancel, QtCore.Qt.Horizontal)
+        buttonBox.addButton(btnResetAll, QtGui.QDialogButtonBox.ActionRole)
+        buttonBox.accepted.connect(self.accept)
+        buttonBox.rejected.connect(self.reject)
+
+        familyContainer.setMinimumSize(QtCore.QSize(600,700))
+        familyContainer.setLayout(self.familyLayout)
+        scrollContainer.setWidget(familyContainer)
+        mainLayout.addWidget(scrollContainer)
+        mainLayout.addWidget(buttonBox)
+        self.setLayout(mainLayout)
+
+        self.setWindowTitle('Advanced plot style management')
 
 
-    def setCursor(self, event=None):
-        QtGui.QApplication.setOverrideCursor(QtCore.Qt.SplitVCursor)
+    def changeAttribute(self, combo):
+        if combo.familywide:
+            family = combo.plotName
+            names = [p.name for p in self.families[family]]
+        if combo.isGlobal:
+            names = [p.name for family in self.families.values() for p in family]
+        else:
+            pass
+            #print "Combo is not a controller"
+
+        newValue = combo.currentText()
+        #print "New value:", newValue
+                
+        for _combo in self.combos:
+            isRightFamily    = _combo.plotName in names
+            isRightAttribute = _combo.attribute == combo.attribute
+            isController     = _combo.familywide or _combo.isGlobal
+            if combo.familywide:
+                if isRightAttribute and isRightFamily and not isController:
+                   ind = _combo.findText(newValue)
+                   _combo.setCurrentIndex(ind)
+            elif combo.isGlobal:
+                #print "Combo is global"
+                if isRightAttribute and not isController:
+                   ind = _combo.findText(newValue)
+                   _combo.setCurrentIndex(ind)
 
 
-    def restoreCursor(self, event=None):
-        QtGui.QApplication.restoreOverrideCursor()
+    def _addCombo(self, attribute, pos, plotName, options, currentOption,
+            tooltips=None, familywide=False, isGlobal=False):
+        layout = self.familyLayout
+
+        combo = Combo()
+        combo.attribute = attribute
+        combo.plotName  = plotName
+        combo.setMinimumWidth(70)
+        if tooltips is not None:
+            for option, tooltip in zip(options, tooltips):
+                ind = combo.count()
+                combo.addItem(option, (plotName,))
+                ##### TO DO: TOOLTIPS ###
+        else:
+            for option in options:
+                combo.addItem(option, (plotName,))
+
+        if currentOption is None:
+            combo.insertItem(0, '', (plotName,))
+            combo.setCurrentIndex(0)
+        else:
+            currentOptionIndex = combo.findText(currentOption)
+            if currentOptionIndex == -1:
+                combo.addItem(currentOption, (plotName,))
+                currentOptionIndex = combo.count() - 1
+            combo.setCurrentIndex(currentOptionIndex)
+
+        layout.addWidget(combo, *pos)
+
+        if familywide:
+            combo.familywide = True
+        if isGlobal:
+            combo.isGlobal   = True
+        
+        self.combos.append(combo)
+
+        return combo
+
+    
+    def addPlotName(self, pos, plotName):
+        lblName = QtGui.QLabel(plotName)
+        self.familyLayout.addWidget(lblName, *pos)
 
 
-    def updateCursor(self, x, y):
+    def style(self):
+        for plotName, patch in self.colorPatches.iteritems():
+            color = self._pyqt2mplColor(patch.color)
+            if 'color' not in self.newStyle:
+                self.newStyle['color'] = {plotName: color}
+            else:
+                self.newStyle['color'].update({plotName: color})
+
+        for combo in self.combos:
+            ind      = combo.currentIndex()
+            value    = str(combo.itemText(ind))
+            attribute= combo.attribute
+            plotName = combo.plotName
+            if combo.isGlobal or combo.familywide:
+                continue
+            
+            if attribute not in self.newStyle:
+                self.newStyle[attribute] = {plotName: value}
+            else:
+                self.newStyle[attribute].update({plotName: value})
+        return self.newStyle
+
+
+    @pyqtSlot()
+    def changeColormap(self, familyName):
+        family       = self.families[familyName]
+        combo        = self.comboColormaps[familyName]
+        plotsInFamily= sorted([plot.name for plot in family])
+        plotNumber   = len(plotsInFamily)
+
+        colormapName = str(combo.itemText(combo.currentIndex()))
+        cmap         = getattr(cm, colormapName)
+        colors       = cmap(np.linspace(0,1,plotNumber))
+        colorPatches = [self.colorPatches[plotName] for plotName in plotsInFamily]
+        
+        for patch, color in zip(colorPatches,colors):
+            color = [c*255 for c in color]
+            patch.setColor(color, 'rgb')
+
+
+    def resetColors(self):
+        colors       = self.oldStyle['color']
+        colorPatches = self.colorPatches
+        for plotName, color in colors.iteritems():
+            color = [c*255 for c in color]
+            patch = colorPatches[plotName]
+            patch.setColor(color, 'rgb')
+
+
+    def addColorPatch(self, pos, plotName, color):
+        patch = ColorPatch(color)
+        patch.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.familyLayout.addWidget(patch, *pos)
+
+        patch.clicked.connect(functools.partial(self.changeColor,patch,plotName))
+
+        if 'color' not in self.oldStyle:
+            self.oldStyle['color'] = {}
+        self.oldStyle['color'][plotName] = color
+        self.colorPatches[plotName] = patch
+    
+
+    def _pyqt2mplColor(self, pyqtColor):
+        isHex = False
         try:
-            self.crossHor.remove()
+            isHex = pyqtColor.startswith('#')
         except AttributeError:
             pass
-        self.crossHor  = self.window.ax.axhline(y, 0, 1, color='black')
-        self.window.canvas.draw()
 
-
-    def setThresh(self, event):
-        if self.crossHor is not None:
-            y = max(self.crossHor.get_ydata())
-
-        if event.key == 'enter':
-            if y in self.thresholds:
-                return
-            self.thresholds.append(y) 
-            self.threshLines.append( self.window.ax.axhline(y, 0, 1, color='black') )
-            self.window.canvas.draw()
-
-        if len(self.thresholds) > 1:
-            self.finish()
-
-
-    def getThresh(self, event):
-        x = event.xdata
-        y = event.ydata
-        if event.button == 3:
-            self.finish()
-        elif event.button == 1:
-            self.updateCursor(x,y)
-
-
-    def finish(self, ):
-        """
-            Ends threshold picking and delegates thresholds to
-            markSpikes(). If only one threshold was selected, the absolute
-            value of it serves as the upper threshold and the negative absolute
-            serves as the lower threshold.
-        """
-        thresholds = self.thresholds
-        if len(thresholds) > 0:
-            self.crossHor.remove()
-
-            for line in self.threshLines:
-                line.remove()
-
-            if len(thresholds) == 1:
-                thresh = thresholds[0]
-                self.gui.markSpikes(max=abs(thresh), min=-abs(thresh))
-            elif len(thresholds) == 2:
-                self.gui.markSpikes(max=max(thresholds), min=min(thresholds))
-
-            self.window.canvas.draw()
-            self.gui.activatePan()
-            self.restoreCursor()
-
-        self.window.fig.canvas.mpl_disconnect(self._getter)
-        self.window.fig.canvas.mpl_disconnect(self._setter)
-        self.window.fig.canvas.mpl_disconnect(self._cursorSetter)
-        del self
+        if isHex:
+            color = mpl.colors.colorConverter.to_rgb(pyqtColor)
+            red, green, blue = color
+        else:
+            red   = pyqtColor.red()/255.
+            blue  = pyqtColor.blue()/255.
+            green = pyqtColor.green()/255.
+        return (red,green,blue)
         
+    
+    @pyqtSlot('PyQt_PyObject','PyQt_PyObject')
+    def changeColor(self, patch, plotName):
+        dialog = QtGui.QColorDialog()
+        dialog.setWindowState(dialog.windowState() & ~QtCore.Qt.WindowMinimized | QtCore.Qt.WindowActive)
+        dialog.activateWindow()
+        color = dialog.getColor()
+        if not QColor.isValid(color):
+            logging.error('Picked color is not valid')
+            return
+
+        patch.setColor(color)
+
+
+    def addAttributeCombo(self, attribute, pos, plotName=None, currentStyle=None, familywide=False,
+            isGlobal=False, styles=None, tooltips=None):
+        if styles is None:
+            if attribute == 'linestyle':
+                styles = ('None','-','--','-.',':')
+                tooltips = ('No line','Solid','Dashed','Dashdot','Dotted')
+
+            elif attribute == 'linewidth':
+                styles = [str(el) for el in range(1,30)]
+
+            elif attribute == 'marker':
+                styles = ('None','.',',','o','v','^','<','>',\
+                                '8','s','p','P','*','h','H','+','x',\
+                                'X','D','d','|','_')
+                tooltips = ('No marker', 'Dot', 'Pixel', 'Circle',\
+                            'Triangle down','Triangle up','Triangle left',\
+                            'Triangle right','Octagon','Square','Pentagon',\
+                            'Plus','Star','Hexagon 1', 'Hexagon 2', 'Plus',\
+                            'X', 'X (filled)', 'Diamond', 'Thin diamond',\
+                            'Vertical line', 'Horizontal line')
+            elif attribute == 'colormap':
+                styles = sorted(['gist_rainbow','viridis', 'plasma', 'inferno', 'magma',
+                        'Greys', 'Purples', 'Blues', 'Greens', 'Oranges', 'Reds',
+                        'YlOrBr', 'YlOrRd', 'OrRd', 'PuRd', 'RdPu', 'BuPu', 'GnBu',
+                        'PuBu', 'YlGnBu', 'PuBuGn', 'BuGn', 'YlGn', 'binary',
+                        'gist_yarg', 'gist_gray', 'gray', 'bone', 'pink', 'spring',
+                        'summer', 'autumn', 'winter', 'cool', 'Wistia', 'hot',
+                        'afmhot', 'gist_heat', 'copper', 'PiYG', 'PRGn', 'BrBG',
+                        'PuOr', 'RdGy', 'RdBu', 'RdYlBu', 'RdYlGn', 'Spectral',
+                        'coolwarm', 'bwr', 'seismic', 'Pastel1', 'Pastel2', 'Paired',
+                        'Accent', 'Dark2', 'Set1', 'Set2', 'Set3', 'flag', 'prism', 'ocean', 'gist_earth',
+                        'terrain', 'gist_stern', 'gnuplot', 'gnuplot2', 'CMRmap',
+                        'cubehelix', 'brg', 'hsv', 'rainbow', 'jet', 'nipy_spectral',
+                        'gist_ncar'])
+            else:
+                print "Available styles for {} must be specified".format(attribute)
+                return
+
+        combo = self._addCombo(attribute, pos, plotName, styles, currentStyle,
+                tooltips, familywide, isGlobal)
+
+        if familywide or isGlobal:
+            combo.currentIndexChanged.connect(functools.partial(self.changeAttribute, combo))
+
+        if attribute == 'colormap':
+            familyName = plotName
+            combo.currentIndexChanged.connect(
+                    functools.partial(self.changeColormap, familyName))
+            combo.setMinimumWidth(150)
+            self.comboColormaps[familyName] = combo
+        else:
+            combo.setMinimumWidth(70)
+
+        if attribute not in self.oldStyle:
+            self.oldStyle[attribute] = {}
+        self.oldStyle[attribute][plotName] = currentStyle
+
+        return combo
+
+
+    def reset(self, attribute=None):
+        self.resetCombos(attribute)
+        self.resetColors()
+
+
+    def resetCombos(self, attribute=None):
+        if attribute is None or not attribute:
+            attributes = self.attributes
+        else:
+            attributes = [attribute]
+
+        for combo in self.combos:
+            attr     = combo.attribute
+            plotName = combo.plotName
+            
+            if attr in attributes:
+                originalValue = self.oldStyle[attr][plotName]
+                if originalValue == None:
+                    originalValue = ''
+                ind = combo.findText(originalValue)
+                combo.setCurrentIndex(ind)
+
+        for family, colormap in self.oldStyle['colormap'].iteritems():
+            comboColormap = self.comboColormaps[family]
+            comboColormap.setCurrentIndex(comboColormap.findText(colormap))
+
+
+    @staticmethod
+    def getStyles(parent = None, family = None, colormaps = None):
+        if family is None or colormaps is None:
+            print "Plot family and colormaps must be specified"
+            return {}
+        dialog = MplLinestyleDialog(parent, family, colormaps)
+        result = dialog.exec_()
+        style = dialog.style()
+        return (style, result == QtGui.QDialog.Accepted)
+
+
+
+class SteadyStateDialog(QtGui.QDialog):
+    def __init__(self, parent=None):
+        super(SteadyStateDialog,self).__init__(parent)
+
+        layout = QtGui.QFormLayout()
+        self.lblThreshold  = QtGui.QLabel('Threshold temperature deviation')
+        self.lblTimeRange  = QtGui.QLabel('Take the last ... minutes as reference')
+        self.editThreshold = QtGui.QLineEdit()
+        self.editTimeRange = QtGui.QLineEdit()
+        try:
+            self.editThreshold.setText(str(parent.steadyStateThreshold))
+            self.editTimeRange.setText(str(parent.steadyStateTimeRange))
+        except AttributeError:
+            pass
+
+        buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok
+                | QtGui.QDialogButtonBox.Cancel, QtCore.Qt.Horizontal)
+        buttonBox.accepted.connect(self.accept)
+        buttonBox.rejected.connect(self.reject)
+
+        layout.addRow(self.lblThreshold, self.editThreshold)
+        layout.addRow(self.lblTimeRange, self.editTimeRange)
+        layout.addRow(buttonBox)
+
+        self.setLayout(layout)
+        self.setWindowTitle('Change steady state definition')
+
+    def definition(self):
+        threshold = self.editThreshold.text()
+        timerange = self.editTimeRange.text()
+        return threshold, timerange
+
+    @staticmethod
+    def getDefinition(parent = None):
+        dialog = SteadyStateDialog(parent)
+        result = dialog.exec_()
+        thresh, time = dialog.definition()
+        return (thresh, time, result == QtGui.QDialog.Accepted)
+        
+
+
+class AxesLimitsDialog(QtGui.QDialog):
+    def __init__(self, parent=None):
+        super(AxesLimitsDialog,self).__init__(parent)
+
+        layout = QtGui.QFormLayout()
+        self.lblxminDate  = QtGui.QLabel('From:')
+        self.lblxmaxDate  = QtGui.QLabel('To:')
+        self.lblymin  = QtGui.QLabel('ymin:')
+        self.lblymax  = QtGui.QLabel('ymax:')
+        self.lblcb    = QtGui.QLabel('Save limits')
+        self.lblSaveLabel    = QtGui.QLabel('Save under label:')
+
+        self.editxminDate = QtGui.QDateTimeEdit()
+        self.editxmaxDate = QtGui.QDateTimeEdit()
+        self.editymin = QtGui.QLineEdit()
+        self.editymax = QtGui.QLineEdit()
+        self.cbSave   = QtGui.QCheckBox()
+        self.editSaveLabel = QtGui.QLineEdit()
+
+        now = datetime.datetime.now()
+        dt  = datetime.timedelta(minutes=10)
+        self.editxminDate.setDateTime(now-dt)
+        self.editxmaxDate.setDateTime(now)
+        
+        buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok
+                | QtGui.QDialogButtonBox.Cancel, QtCore.Qt.Horizontal)
+        buttonBox.accepted.connect(self.accept)
+        buttonBox.rejected.connect(self.reject)
+
+        layout.addRow(self.lblxminDate, self.editxminDate)
+        layout.addRow(self.lblxmaxDate, self.editxmaxDate)
+        layout.addRow(self.lblymin, self.editymin)
+        layout.addRow(self.lblymax, self.editymax)
+        layout.addRow(self.lblcb,   self.cbSave)
+        layout.addRow(self.lblSaveLabel,   self.editSaveLabel)
+        layout.addRow(buttonBox)
+
+        self.setLayout(layout)
+        self.setWindowTitle('Set window limits')
+
+    @staticmethod
+    def validate(val):
+        try:
+            val = float(val)
+        except:
+            val = None
+        return val
+
+    
+    def saveState(self):
+        return self.cbSave.isChecked(), self.editSaveLabel.text()
+
+
+    def limits(self):
+        xminDate = self.editxminDate.dateTime().toPyDateTime()
+        xmaxDate = self.editxmaxDate.dateTime().toPyDateTime()
+        xmin = mpl.dates.date2num(xminDate)
+        xmax = mpl.dates.date2num(xmaxDate)
+        ymin = self.editymin.text()
+        ymax = self.editymax.text()
+        return xmin, xmax, ymin, ymax
+
+
+    @staticmethod
+    def getLimits(parent = None):
+        dialog = AxesLimitsDialog(parent)
+        result = dialog.exec_()
+        xmin, xmax, ymin, ymax = [dialog.validate(val) for val in dialog.limits()]
+        save, label = dialog.saveState()
+        return ([xmin, xmax], [ymin, ymax], [save, label], result == QtGui.QDialog.Accepted)
+        
+
+
+class AverageDialog(QtGui.QDialog):
+    def __init__(self, parent=None):
+        super(AverageDialog,self).__init__(parent)
+
+        layout = QtGui.QFormLayout()
+        self.lblPoints  = QtGui.QLabel('Number of points to average over')
+        self.lblMethod  = QtGui.QLabel('Numpy method used for averaging')
+        self.editPoints = QtGui.QLineEdit()
+        self.editMethod = QtGui.QLineEdit()
+        try:
+            self.editPoints.setText(str(parent._points))
+            self.editMethod.setText(str(parent._averageMethod))
+        except AttributeError:
+            pass
+
+        buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok
+                | QtGui.QDialogButtonBox.Cancel, QtCore.Qt.Horizontal)
+        buttonBox.accepted.connect(self.accept)
+        buttonBox.rejected.connect(self.reject)
+
+        layout.addRow(self.lblPoints, self.editPoints)
+        layout.addRow(self.lblMethod, self.editMethod)
+        layout.addRow(buttonBox)
+
+        self.setLayout(layout)
+        self.setWindowTitle('Data averaging')
+
+    def definition(self):
+        points = int(self.editPoints.text())
+        method = str(self.editMethod.text())
+        return points, method
+
+    @staticmethod
+    def getSettings(parent = None):
+        dialog = AverageDialog(parent)
+        result = dialog.exec_()
+        points, method = dialog.definition()
+        return (points, method, result == QtGui.QDialog.Accepted)
+
+
+
+##############################################################################
+# Core Classes
+##############################################################################
+class Window(QtCore.QObject):
+    global mode
+    global fileMode
+    progress = pyqtSignal('PyQt_PyObject','PyQt_PyObject','PyQt_PyObject')
+    track    = pyqtSignal()
+    doneSig  = pyqtSignal()
+
+    def __init__(self, gui):
+        super(Window,self).__init__()
+        self.fig = Figure()
+        self.canvas = FigureCanvas(self.fig)
+        self.ax = self.fig.add_subplot(111)
+
+        self.canvas.setFocusPolicy( QtCore.Qt.ClickFocus )
+        self.canvas.setFocus()
+
+        self.sensors = []
+        self.spikes  = []
+        self.dups    = []
+        self.dupLines= []
+        self.graphs  = {}
+        self.colors  = {}
+        self.data    = {}
+        self.compareAx   = None
+        self.compareLims = None
+        self.marker  = '+'
+
+        self.ax.xaxis_date()
+        self.updateTicks()
+
+        self.ax.set_xlabel('Time')
+        self.ax.set_ylabel('Sensor temperature [$^\circ$C]')
+
+        self.updateThread = updateThread()
+        self.freqThread = DataFrequencyThread(gui, self.updateThread)
+        self.gui = gui
+        self.fig.canvas.mpl_connect('motion_notify_event',self.onMove)
+        self.fig.canvas.mpl_connect('button_release_event',self.onRelease)
+
+
+    def updateAverage(self, points, method):
+        """
+        Averages the data points on the canvas over intervals with `points`
+        points using the numpy method `method` by delegating the graph data to
+        `update()`. If applied successively, the averaging effects will add to
+        each other: Averaging over 5 and then over 2 points will effectively
+        average the original data over 10 points. The original data can be
+        restored using `restore()`.
+
+        Receives:
+            integer     `points`    Number of data points to average over
+            string      `method`    Numpy method to use for averaging
+        Returns:
+            None
+        """
+        for sensor, graph in self.graphs.iteritems():
+            x = graph.get_xdata()
+            y = graph.get_ydata()
+
+            try:
+                x, y = self.average(x, y, points, method)
+            except AttributeError, e:
+                print str(e)
+
+            graph.set_xdata(x)
+            graph.set_ydata(y)
+        
+        self.ax.draw_artist(self.ax.patch)
+        for graph in self.graphs.values():
+            self.ax.draw_artist(graph)
+
+        self.ax.grid(True)
+        self.canvas.update()
+        self.canvas.flush_events()
+
+
+    def restore(self):
+        """
+        Restores the original data points. This method can be used to undo
+        averaging after using `averagePlot`.
+        
+        Receives:
+            None
+        Returns:
+            None
+        """
+        for sensor, sensorData in self.data.iteritems():
+            x, y = sensorData
+
+            graph = self.graphs[sensor]
+            graph.set_xdata(x)
+            graph.set_ydata(y)
+        
+        self.ax.draw_artist(self.ax.patch)
+        for graph in self.graphs.values():
+            self.ax.draw_artist(graph)
+
+        self.ax.grid(True)
+        self.canvas.update()
+        self.canvas.flush_events()
+
+
+    def average(self, x, y, points, method='mean'):
+        """ 
+        Bins `x` and `y` into bins comprising `points` points. 
+        
+        Receives:
+        args
+            numpy array `x`         Array to be binned
+            numpy array `y`         Array to be binned
+            integer     `points`    Number of point over which to average
+        kwargs
+            string      `method`    Numpy method to use for averaging. 
+                                    Default: 'mean'
+
+        Returns:
+            numpy array `avgx`      Binned array
+            numpy array `avgy`      Binned array
+        """
+        bins = x.size/points
+        rest = x.size%points
+        avgx = np.zeros(bins+1)
+        avgy = np.zeros(bins+1)
+        
+        method = getattr(np, method)
+        
+        j = 0
+        for i in range(bins):
+            avgx[i] = method(x[j:j+points])
+            avgy[i] = method(y[j:j+points])
+            j += points
+
+        avgx[-1] = method(x[-rest:])
+        avgy[-1] = method(y[-rest:])
+
+        return avgx, avgy
+
+
+    def getTVACambientTemperatures(self):
+        file = QtGui.QFileDialog.getOpenFileName(self.gui, 
+                'Choose TVAC temperature source file')
+
+        ok = os.path.isfile(file)
+        if ok:
+            with open(file, 'r') as f:
+                lines = f.readlines()
+                
+            lines = lines[1:]
+            size = len(lines)
+            sets  = np.zeros(size)
+            temps = np.zeros(size)
+            datetimes = np.zeros(size)
+            setsFiltered = []
+            datetimesFiltered = []
+
+            self.track.emit()
+            print "Getting TVAC temperatures"
+            for i, line in enumerate(lines):
+                if i%5 == 0:
+                    self.progress.emit(size, i, 
+                            "Getting TVAC temperatures (line {} of {})".format(i, size))
+
+                cols = [el.replace(',','.') for el in line.split()]
+                date = cols[0]
+                time = cols[1].split('.')[0]
+                tempSet = cols[2]
+                tempIs  = cols[3]
+
+                datefmt ='%d.%m.%Y %H:%M:%S'
+                dtime   = datetime.datetime.strptime(date + ' ' + time, datefmt)
+                dtime   = mpl.dates.date2num(dtime)
+
+                sets[i]      = tempSet
+                temps[i]     = tempIs
+                datetimes[i] = dtime
+            self.doneSig.emit()
+
+            # Filter temperature setting data to only contain the first and
+            # last point of a constant setting to save processor time when
+            # plotting
+            for i, val in enumerate(sets):
+                if i+1 == sets.size:
+                    break
+                if sets[i+1] != sets[i]:
+                    setsFiltered.append(sets[i])
+                    setsFiltered.append(sets[i+1])
+                    datetimesFiltered.append(datetimes[i])
+                    datetimesFiltered.append(datetimes[i+1])
+                    
+            setsFiltered      = np.array(setsFiltered)
+            datetimesFiltered = np.array(datetimesFiltered)
+
+            return (datetimes, temps), (datetimesFiltered, setsFiltered)
+
+
+    def zoomOut(self, ax):
+        """
+        This function ensures that all plots in the Axes object `ax` are
+        visible and zooms to the y-values in the shown range. Finds
+        corresponding axes limits. Sets object attribute `compareLims` to the
+        found values and sets the ylims of `ax` to `compareLims`. This function
+        only considers Line2D objects (no scatter plots).
+
+        Receives:
+            Matplotlib Axes instance    ax      The axes to be zoomed to
+                                                contents
+        Returns:
+            None
+        """
+        xmin, xmax = ax.xaxis.get_view_interval()
+        data = []
+        for line in ax.lines:
+            isSetting = str(line.get_label())=='setting'
+            if line.get_visible() and not isSetting:
+                xdata = line.get_xdata()
+                ydata = line.get_ydata()
+                data.append(list(ydata[np.logical_and( xmin <= xdata, xdata <= xmax)]))
+
+        data = [float(item) for sublist in data for item in sublist]
+        if len(data) == 0:
+            return
+        miny, maxy = [min(data), max(data)]
+
+        if miny > 0:
+            miny *= 0.95
+        else:
+            miny *= 1.05
+        if maxy > 0:
+            maxy *= 1.05
+        else:
+            maxy *= 0.95
+
+        self.compareLims = (miny, maxy)
+            
+        ax.set_ylim(self.compareLims, emit=False)
+        
+
+    def setCompareAxis(self, quantity):
+        """
+        Creates second Axes object that has a common x-axis with the main Axes.
+        Draws the quantity `quantity` in these Axes.
+        
+        Receives:
+            string      quantity    The quantity to be drawn in the second Axes
+                                    object
+        Returns:
+            None
+        """
+        quantity = str(quantity)
+        if self.compareAx is not None:
+            self.compareAx.remove()
+            self.compareAx = None
+            self.canvas.draw()
+        if quantity in (None, 'none', 'None'):
+            return
+        
+        self.compareAx = self.ax.twinx()
+        self.compareAx.callbacks.connect('ylim_changed', self.zoomOut)
+
+        if quantity == 'TVAC temperature':
+            result = self.getTVACambientTemperatures()
+            if result is None:
+                return
+            (times, temps), (setTimes, settings) = result
+            self.compareAx.plot(times,temps, color='black')
+            self.compareAx.plot(setTimes,settings, color='black', ls='--', label='setting')
+
+            self.compareAx.set_ylabel('TVAC temperature [$^\circ$C]')
+            self.zoomOut(self.compareAx)
+        else:
+            print "Didn't recognize quantity"
+        self.canvas.draw()
+
+
+    def applyTimeZone(self, tzDelta):
+        """
+        Shifts all plotted lines in x-direction by `tzDelta` hours.
+
+        Receives:
+            integer     tzDelta     Number of hours by which all plots should
+                                    be shifted in x-direction
+        Returns:
+            None
+        """
+        for line in self.ax.lines:
+            times = line.get_xdata()
+            times = [mpl.dates.date2num(mpl.dates.num2date(time)
+                                            + datetime.timedelta(hours=tzDelta))
+                        for time in times]
+            line.set_xdata(times)
+        self.canvas.draw()
+
+
+    def onMove(self, event):
+        if event.inaxes:
+            x = event.xdata
+            y = event.ydata
+            prettyDate = str(mpl.dates.num2date(x)).split('.')[0]
+            self.gui.statusbar.showMessage(u'x = {}, y = {:.1f}\u00b0C'.format(prettyDate,y))
+        else:
+            self.gui.statusbar.clearMessage()
+
+
+    def onRelease(self, event):
+        if self.gui.toolbar._active == 'ZOOM':
+            self.gui.toolbar.release_zoom(event)
+        elif self.gui.toolbar._active == 'PAN':
+            self.gui.toolbar.release_pan(event)
+        self.updateTicks()
+        # This is necessary so ticks will be refreshed after releasing
+        # mouse -.-
+        p, = self.ax.plot(range(10))
+        p.remove()
+        self.fig.canvas.draw()
+        p, = self.ax.plot(range(10))
+        p.remove()
+        self.fig.canvas.draw()
+
+
+    def toggleSensors(self, selectedSensors):
+        for sensor in self.sensors:
+            selected = sensor.name in selectedSensors
+            plotted  = sensor.name in self.graphs
+            if plotted:
+                graph = self.graphs[sensor.name]
+            else:
+                print 'Sensor without graph encountered: {}'.format(sensor.name)
+                logging.error(
+                    "Graph for sensor {} seems to not have been initialized."\
+                    .format(sensor.name))
+
+            visible  = graph.get_visible()
+            if selected and not visible:
+                graph.set_visible(True)
+            if not selected and visible:
+                graph.set_visible(False)
+
+        self.canvas.draw()
+
+
+    def str2mpldate(self, str):
+        if fileMode or mode == 'simulation':
+            # str should already be a mpl date in this case
+            return str
+        time = datetime.datetime.strptime(str, '%Y-%m-%dT%H:%M:%S')
+
+        # Convert time zones (UTC --> local)
+        time = time + datetime.timedelta(hours=self.gui.timeZone)
+        return mpl.dates.date2num(time)
+
+    
+    def initGraphs(self, data):
+        logging.info("Initializing graphs")
+        self.graphs = {}
+
+        for sensorData in data:
+            sensor = sensorData[0]
+            if sensor in ('THM System State','State','System State'):
+                continue
+            x = sensorData[1]
+            y = sensorData[2]
+
+            self.sensors.append(Sensor(sensor))
+
+            try:
+                y = float(y)
+            except ValueError:
+                y = np.nan
+            except TypeError:
+                print "{} cannot be converted to float.".format(y) +\
+                "Argument must be a string or a number"
+                y = np.nan
+
+            timestamp = self.str2mpldate(x)
+            self.graphs[sensor] = self.ax.plot_date([timestamp],[y])[0]
+
+        self.sensors = sorted(self.sensors, key = lambda x: x.name)
+        self.subsystems = sorted(list(set([s.subsystem for s in self.sensors])))
+
+        self.assignColors()
+
+        self.updateTicks()
+        showGrid = self.gui.cbShowGrid.isChecked()
+        if showGrid:
+            self.ax.grid(True)
+        self.canvas.draw()
+
+
+    def assignColors(self):
+        colorsBySubsystem = {}
+        self.colormaps = {
+                'ADCS': 'gist_rainbow',
+                'CDH':  'summer',
+                'COM':  'autumn',
+                'Payload':  'inferno',
+                'EPS':  'winter'}
+
+        for sensor in self.sensors:
+            sub = sensor.subsystem
+            sensorsInSub = len([s for s in self.sensors if s.subsystem == sub])
+            if sub in self.colormaps:
+                colormap = getattr(cm, self.colormaps[sub])
+            else:
+                print "No colormap specified for subsystem {}. ".format(sub)+\
+                        "Using gist_rainbow."
+                colormap = getattr(cm, 'gist_rainbow')
+            colorsBySubsystem[sub] = colormap(np.linspace(0,1,sensorsInSub))
+
+        self.colors = {}
+        for sub in self.subsystems:
+            colors = colorsBySubsystem[sub]
+            subsystemSensors = [s for s in self.sensors if s.subsystem == sub]
+            for sensor, color in zip(subsystemSensors, colors):
+                self.colors[sensor.name] = color
+
+        for sensor, graph in self.graphs.iteritems():
+            graph.set_color(self.colors[sensor])
+
+
+    def goLive(self):
+        logging.info("Starting data retrieval")
+        self.gui.disconnect(self.updateThread, 
+                            SIGNAL('refresh_feed(PyQt_PyObject)'), 
+                            self.update)
+        self.gui.disconnect(self.updateThread, 
+                            SIGNAL('finished()'), 
+                            self.done)
+        self.gui.disconnect(self.updateThread, 
+                            SIGNAL('plot_all(PyQt_PyObject)'), 
+                            self.plotAll)
+        self.gui.disconnect(self.updateThread, 
+                            SIGNAL('discard_data()'), 
+                            self.clear)
+        try:
+            self.updateThread.duplicatesReady.disconnect(self.gui.receiveDuplicates)
+        except TypeError:
+            pass
+
+        self.gui.connect(self.updateThread, 
+                            SIGNAL('refresh_feed(PyQt_PyObject)'), 
+                            self.update)
+        self.gui.connect(self.updateThread, 
+                            SIGNAL('finished()'), 
+                            self.done)
+        self.gui.connect(self.updateThread, 
+                            SIGNAL('plot_all(PyQt_PyObject)'), 
+                            self.plotAll)
+        self.gui.connect(self.updateThread, 
+                            SIGNAL('discard_data()'), 
+                            self.clear)
+        self.updateThread.duplicatesReady.connect(self.gui.receiveDuplicates)
+
+        self.updateThread.start()
+        self.freqThread.start()
+
+
+    def done(self):
+        logging.info("Data retrieval stopped")
+
+
+    def started(self):
+        logging.info("Data retrieval started")
+
+
+    def stahp(self):
+        if self.updateThread.isFinished():
+            self.gui.statusbar.showMessage("The thread has already stopped, stop hitting the stop button!", 2000)
+            return
+        logging.info("Stopping data retrieval")
+        self.updateThread.quit()
+        self.updateThread.terminate()
+        self.freqThread.quit()
+        self.freqThread.terminate()
+        self.gui.statusbar.showMessage('Feed stopped', 2000)
+
+
+    def getSelectedSensors(self):
+        if hasattr(self.gui,'checkBoxes'):
+            selectedSensors =  [sensor \
+                                for sensor,cb in self.gui.checkBoxes.iteritems() \
+                                if cb.isChecked()]
+        else:
+            selectedSensors = [s.name for s in self.sensors]
+        return selectedSensors
+
+
+    def plotAll(self, plotData):
+        """ Plots all data from a file instantly """
+        self.ax.clear()
+        for x in self.dups:
+            self.dupLines.append(self.ax.axvline(x,0,1,color='grey',ls='--'))
+        
+        self.sensors = [Sensor(name) for name in sorted(plotData.keys())]
+        self.subsystems = sorted(list(set([s.subsystem for s in self.sensors])))
+        amountSensors= len(self.sensors)
+
+        self.track.emit()
+        size = len(plotData)
+        for i, (sensor, data) in enumerate(plotData.iteritems()):
+            self.progress.emit(size, i, "Plotting graph ({})".format(sensor))
+            x, y = data
+            graph = self.ax.plot_date(x,y,
+                                        marker=self.marker,
+                                        ls='solid')[0]
+            self.graphs[sensor] = graph
+        self.doneSig.emit()
+
+        self.assignColors()
+        
+        if self.gui.sensorTable.rowCount() == 0:
+            self.gui.populateSensorTable(self.sensors)
+                
+        if self.gui.cbShowGrid.isChecked():
+            self.ax.grid(True)
+        else:
+            self.ax.grid(False)
+
+        self.data = plotData
+        self.gui.zoom('all')
+        self.canvas.draw()
+
+
+    def update(self, data, live=True):
+        """ 
+        Append data and re-draw canvas. This method is only invoked in live mode
+        """
+        if len(self.graphs) == 0:
+            self.initGraphs(data)
+
+        selectedSensors = self.getSelectedSensors()
+
+        xtot    = []
+        ytot    = []
+        oldxLim     = self.ax.get_xlim()
+        oldyLim     = self.ax.get_ylim()
+        fixedView   = not self.gui.cbAutoUpdate.isChecked()
+        try:
+            xLimit  = float(self.gui.editWindowWidth.text())
+        except:
+            xLimit  = None
+        
+        for sensorData in data:
+            sensor  = sensorData[0]
+            newx    = sensorData[1]
+            newy    = sensorData[2]
+            if sensor in ('THM System State','State','System State'):
+                if newy == 1:
+                    logging.warning('SYSTEM IN WARNING STATE')
+                    self.gui.warning(newy)
+                elif newy == 2:
+                    logging.warning('!!!!!! SYSTEM IN CRITICAL STATE !!!!!!')
+                    self.gui.warning(newy)
+                continue
+
+            selected = sensor in selectedSensors
+            graph   = self.graphs[sensor]
+            oldData = graph.get_xydata()
+
+            try:
+                newy = float(newy)
+            except ValueError:
+                newy = np.nan
+            newx = self.str2mpldate(newx)
+
+            if len(oldData) == 0:
+                x = [newx]
+                y = [newy]
+            else:
+                x = [_x for _x,_ in oldData]
+                x.append(newx)
+                y = [_y for _,_y in oldData]
+                y.append(newy)
+
+                if live:
+                    self.checkSteadyState(sensor,x,y)
+            # This might lead to problems if the program has been running for
+            # a long time and xtot gets huge. Consider reducing it to unique
+            # values
+            xtot.extend(x)
+            ytot.extend(y)
+
+            # Sort data by time so lines between points don't go crazy
+            x, y = zip(*sorted(zip(x,y)))
+
+            # Show current temperature values
+            # This has to happen after the arrays were chronologically sorted
+            try:
+                self.gui.tempLabels[sensor].setText('{:.1f}'.format(y[-1]) + u'\u00b0C')
+                self.gui.tempLabels[sensor].update()
+            except:
+                pass
+
+            try:
+                graph.remove()
+            except:
+                pass
+            marker = self.marker
+            if self.gui.cbShowLines.isChecked():
+                graph = self.ax.plot_date(x,y,
+                                    color=self.colors[sensor],
+                                    marker=marker,
+                                    ls='solid')[0]
+            else:
+                graph = self.ax.plot_date(x,y,
+                                    color=self.colors[sensor],
+                                    marker=None,
+                                    ls='none')[0]
+
+            if not selected:
+                graph.set_visible(False)
+
+            self.graphs[sensor] = graph
+
+        if fixedView:
+            self.ax.set_xlim(oldxLim)
+            self.ax.set_ylim(oldyLim)
+        else:
+            if min(xtot)==max(xtot):
+                date     = mpl.dates.num2date(max(xtot))
+                padLeft  = datetime.timedelta(minutes=5)
+                padRight = datetime.timedelta(minutes=1)
+                self.ax.set_xlim(date-padLeft,date+padRight)
+            else:
+                minDate  = mpl.dates.num2date(min(xtot))
+                maxDate = mpl.dates.num2date(max(xtot))
+                xmin    = mpl.dates.num2date(self.ax.get_xlim()[0])
+                if xLimit:
+                    range  = maxDate-xmin
+                    minutes = xLimit
+                    xLimit  = datetime.timedelta(minutes=minutes)
+                    if range > xLimit:
+                        maxDate+= datetime.timedelta(minutes = minutes/10 )
+                        self.ax.set_xlim([maxDate-xLimit,maxDate])
+                    else:
+                        padRight = (maxDate-xmin)/20
+                        self.ax.set_xlim(xmin,maxDate+padRight)
+                else:
+                    padRight = (maxDate-xmin)/20
+                    self.ax.set_xlim(xmin,maxDate+padRight)
+
+        if self.gui.sensorTable.rowCount() == 0:
+            self.gui.populateSensorTable(self.sensors)
+
+        if live:
+            self.updateTicks()
+            self.canvas.draw()
+
+
+    def getSensor(self, sensorName):
+        sensorList = [s for s in self.sensors if s.name == sensorName]
+        if len(sensorList) > 0:
+            sensor = sensorList[0]
+        else:
+            print "No sensor {} found".format(sensorName)
+            sensor = None
+        return sensor
+        
+
+    def checkSteadyState(self, sensor, times, data):
+        times       = [mpl.dates.num2date(time) for time in times]
+        threshold   = self.gui.steadyStateThreshold
+        dt          = datetime.timedelta(minutes=self.gui.steadyStateTimeRange)
+        inSteadyState = self.getSensor(sensor).steady
+        y = []
+
+        if sensor in ('THM System State','State','System State'):
+            return
+        for time, _y in zip(times,data):
+            if max(times)-dt < time <= max(times):
+                y.append(_y)
+
+        try:
+            if abs(min(y) - max(y)) < threshold:
+                if not inSteadyState:
+                    self.emit(SIGNAL('steady_state_changed(PyQt_PyObject, PyQt_PyObject)'), sensor, True)
+            else:
+                if inSteadyState:
+                    self.emit(SIGNAL('steady_state_changed(PyQt_PyObject, PyQt_PyObject)'), sensor, False)
+        except ValueError:
+            pass
+
+
+    def updateTicks(self, xmin=None, xmax=None):
+        dateFmtMajor, dateFmtMinor = self.getDateFormat(xmin, xmax)
+        self.ax.xaxis.set_major_formatter(dateFmtMajor)
+        self.ax.xaxis.set_minor_formatter(dateFmtMinor)
+        try:
+            self.fig.autofmt_xdate()
+        except RuntimeError:
+            locator = mpl.dates.AutoDateLocator()
+            self.ax.xaxis.set_minor_locator(locator)
+            self.ax.xaxis.set_major_locator(locator)
+            dateFmt = mpl.dates.AutoDateFormatter(locator)
+            self.ax.xaxis.set_major_formatter(dateFmt)
+            self.ax.xaxis.set_minor_formatter(dateFmt)
+            self.fig.autofmt_xdate()
+
+
+    def getDateFormat(self, xmin, xmax):
+        if xmin is None:
+            xmin = self.ax.get_xlim()[0]
+        if xmax is None:
+            xmax = self.ax.get_xlim()[1]
+        dateRange = mpl.dates.num2date(xmax) - mpl.dates.num2date(xmin)
+
+        maxMinutes = lambda x: datetime.timedelta(minutes=x)
+        seconds = lambda x: mpl.dates.SecondLocator(interval=x)
+        minutes = lambda x: mpl.dates.MinuteLocator(interval=x)
+        hours   = lambda x: mpl.dates.HourLocator(interval=x)
+        days    = lambda x: mpl.dates.DayLocator(interval=x)
+        months  = lambda x: mpl.dates.MonthLocator(interval=x)
+        years   = lambda x: mpl.dates.YearLocator(base=x)
+
+        if dateRange < maxMinutes(1):
+            self.ax.xaxis.set_minor_locator(seconds(10))
+            self.ax.xaxis.set_major_locator(seconds(30))
+            dateFmtMajor = mpl.dates.DateFormatter('%M:%S')
+            dateFmtMinor = mpl.dates.DateFormatter('%S')
+
+        elif dateRange < maxMinutes(20):
+            self.ax.xaxis.set_minor_locator(seconds(30))
+            self.ax.xaxis.set_major_locator(minutes(2))
+            dateFmtMajor = mpl.dates.DateFormatter('%H:%M:%S')
+            dateFmtMinor = mpl.dates.DateFormatter('%M:%S')
+
+        elif dateRange < maxMinutes(40):
+            self.ax.xaxis.set_minor_locator(minutes(2))
+            self.ax.xaxis.set_major_locator(minutes(5))
+            dateFmtMajor = mpl.dates.DateFormatter('%H:%M')
+            dateFmtMinor = mpl.dates.DateFormatter('%M:%S')
+
+        elif dateRange < maxMinutes(120):
+            self.ax.xaxis.set_minor_locator(minutes(10))
+            self.ax.xaxis.set_major_locator(minutes(20))
+            dateFmtMajor = mpl.dates.DateFormatter('%b %d %H:%M')
+            dateFmtMinor = mpl.dates.DateFormatter('%M:%S')
+
+        elif dateRange < maxMinutes(480):
+            self.ax.xaxis.set_minor_locator(minutes(15))
+            self.ax.xaxis.set_major_locator(minutes(30))
+            dateFmtMajor = mpl.dates.DateFormatter('%b %d %H:%M')
+            dateFmtMinor = mpl.dates.DateFormatter('%M:%S')
+
+        elif dateRange < maxMinutes(12*60):
+            self.ax.xaxis.set_minor_locator(minutes(30))
+            self.ax.xaxis.set_major_locator(hours(1))
+            dateFmtMajor = mpl.dates.DateFormatter('%Y-%m-%d %H:%M')
+            dateFmtMinor = mpl.dates.DateFormatter('%Hh')
+
+        elif dateRange < maxMinutes(24*60):
+            self.ax.xaxis.set_minor_locator(hours(1))
+            self.ax.xaxis.set_major_locator(hours(3))
+            dateFmtMajor = mpl.dates.DateFormatter('%Y-%m-%d %Hh')
+            dateFmtMinor = mpl.dates.DateFormatter('%Hh')
+
+        elif dateRange < maxMinutes(24*60*3):
+            self.ax.xaxis.set_minor_locator(hours(3))
+            self.ax.xaxis.set_major_locator(hours(12))
+            dateFmtMajor = mpl.dates.DateFormatter('%Y-%m-%d %Hh')
+            dateFmtMinor = mpl.dates.DateFormatter('%d %Hh')
+
+        elif dateRange < maxMinutes(24*60*10):
+            self.ax.xaxis.set_minor_locator(hours(12))
+            self.ax.xaxis.set_major_locator(days(1))
+            dateFmtMajor = mpl.dates.DateFormatter('%Y-%m-%d')
+            dateFmtMinor = mpl.dates.DateFormatter('%d %Hh')
+
+        elif dateRange < maxMinutes(24*60*365/12):
+            self.ax.xaxis.set_minor_locator(days(1))
+            self.ax.xaxis.set_major_locator(days(5))
+            dateFmtMajor = mpl.dates.DateFormatter('%Y-%m-%d')
+            dateFmtMinor = mpl.dates.DateFormatter('%d')
+
+        elif dateRange < maxMinutes(24*60*3*365/12):
+            self.ax.xaxis.set_minor_locator(days(1))
+            self.ax.xaxis.set_major_locator(days(10))
+            dateFmtMajor = mpl.dates.DateFormatter('%Y-%m-%d')
+            dateFmtMinor = mpl.dates.DateFormatter('%d')
+
+        elif dateRange < maxMinutes(24*60*365):
+            self.ax.xaxis.set_minor_locator(days(10))
+            self.ax.xaxis.set_major_locator(months(1))
+            dateFmtMajor = mpl.dates.DateFormatter('%Y-%m')
+            dateFmtMinor = mpl.dates.DateFormatter('')
+
+        elif dateRange < maxMinutes(24*60*365*3):
+            self.ax.xaxis.set_minor_locator(months(1))
+            self.ax.xaxis.set_major_locator(months(3))
+            dateFmtMajor = mpl.dates.DateFormatter('%Y-%m')
+            dateFmtMinor = mpl.dates.DateFormatter('')
+
+        else:
+            self.ax.xaxis.set_minor_locator(months(1))
+            self.ax.xaxis.set_major_locator(years(1))
+            dateFmtMajor = mpl.dates.DateFormatter('%Y')
+            dateFmtMinor = mpl.dates.DateFormatter('')
+
+        return dateFmtMajor, mpl.dates.DateFormatter('')
+
+
+    def clear(self):
+        """
+        Clears the window axes and resets all attributes that hold data related
+        to the plots.
+        
+        Receives:
+            None
+        Returns:
+            None
+        """
+        restart = False
+        if self.updateThread.isRunning():
+            self.stahp()
+            restart = True
+
+        self.ax.clear()
+        self.canvas.draw()
+        self.data = {}
+        self.graphs = {}
+        self.sensors = []
+        self.colors = {}
+
+        if restart:
+            self.goLive()
+
 
 
 class Monitor(QMainWindow, Ui_MainWindow):
@@ -1662,6 +2849,183 @@ class Monitor(QMainWindow, Ui_MainWindow):
 
 
 
+##############################################################################
+# Misc Classes
+##############################################################################
+class Sensor():
+    # Mapping should be provided before initializing instances via
+    # Sensor.mapping = dict
+    mapping = {}
+    def __init__(self, name):
+        self.name = name
+        if name in self.mapping:
+            self.subsystem = self.mapping[name]['subsystem']
+            self.component = self.mapping[name]['component']
+        else:
+            print "No component/subsystem found for sensor {}. ".format(name)+\
+                    "Make sure this sensor has a mapping in the supplied mapping dict"
+            self.subsystem = 'None'
+            self.component = 'None'
+        self.steady = False
+        
+
+
+class MyHeader(QHeaderView):
+    """
+    QHeaderView subclass featuring a master checkbox 
+    """
+    isOn = True
+
+    def __init__(self, orientation, labels, gui):
+        parent = gui.sensorTable
+        QHeaderView.__init__(self, orientation, parent)
+        self.gui = gui
+        self.labels = labels
+
+
+    def paintSection(self, painter, rect, logicalIndex):
+        painter.save()
+        color = QtGui.QColor(153,153,153)
+        QHeaderView.paintSection(self, painter, rect, logicalIndex)
+        painter.restore()
+        painter.fillRect(rect, QtGui.QBrush(color))
+        pen = QtGui.QPen(QtCore.Qt.white)
+        painter.setPen(pen)
+        font = QtGui.QFont('Helvetica', 10, QtGui.QFont.Bold)
+        painter.setFont(font)
+        textRect = QtCore.QRectF(rect.x()+10,rect.y(),rect.height(),rect.width())
+        painter.drawText(rect, QtCore.Qt.AlignLeft, self.labels[logicalIndex])
+
+        if logicalIndex == 0:
+            option = QStyleOptionButton()
+            option.rect = QRect(0, 7, 10, 10)
+            if self.isOn:
+                option.state = QStyle.State_On
+            else:
+                option.state = QStyle.State_Off
+            self.style().drawControl(QStyle.CE_CheckBox, option, painter)
+            self.option = option
+
+
+    def mousePressEvent(self, event):
+        x = event.pos().x()
+        y = event.pos().y()
+        inxRange = 5 < x < 17
+        inyRange = 7 < y < 21
+        if inxRange and inyRange:
+            self.isOn = not self.isOn
+            self.updateSection(0)
+            QHeaderView.mousePressEvent(self, event)
+            self.gui.toggleAllPlots(self.isOn)
+
+
+
+class Plot():
+    def __init__(self, line, name, colormap):
+        self.name  = str(name)
+        self.colormap = str(colormap)
+        self.color = mpl.colors.colorConverter.to_rgb(mpl.artist.getp(line, 'color'))
+        self.linestyle    = str(mpl.artist.getp(line, 'linestyle'))
+        self.linewidth    = str(int(mpl.artist.getp(line, 'linewidth')))
+        self.marker= str(mpl.artist.getp(line, 'marker'))
+
+
+
+class ThresholdPicker():
+    """
+        Threshold picker
+    """
+    def __init__(self, gui):
+        self.window = gui.window
+        self.gui = gui
+        self.threshLines = []
+        self.thresholds = []
+        self.crossVert  = None
+        self.crossHor   = None
+        #self.gui.deactivatePanZoom()
+        self._getter = self.window.fig.canvas.mpl_connect('button_press_event', self.getThresh)
+        self._setter = self.window.fig.canvas.mpl_connect('key_press_event', self.setThresh)
+        self._cursorSetter = self.window.fig.canvas.mpl_connect('axes_enter_event', self.setCursor)
+
+        
+    def __del__(self):
+        self.window.fig.canvas.mpl_disconnect(self._getter)
+        self.window.fig.canvas.mpl_disconnect(self._setter)
+        self.window.fig.canvas.mpl_disconnect(self._cursorSetter)
+
+
+    def setCursor(self, event=None):
+        QtGui.QApplication.setOverrideCursor(QtCore.Qt.SplitVCursor)
+
+
+    def restoreCursor(self, event=None):
+        QtGui.QApplication.restoreOverrideCursor()
+
+
+    def updateCursor(self, x, y):
+        try:
+            self.crossHor.remove()
+        except AttributeError:
+            pass
+        self.crossHor  = self.window.ax.axhline(y, 0, 1, color='black')
+        self.window.canvas.draw()
+
+
+    def setThresh(self, event):
+        if self.crossHor is not None:
+            y = max(self.crossHor.get_ydata())
+
+        if event.key == 'enter':
+            if y in self.thresholds:
+                return
+            self.thresholds.append(y) 
+            self.threshLines.append( self.window.ax.axhline(y, 0, 1, color='black') )
+            self.window.canvas.draw()
+
+        if len(self.thresholds) > 1:
+            self.finish()
+
+
+    def getThresh(self, event):
+        x = event.xdata
+        y = event.ydata
+        if event.button == 3:
+            self.finish()
+        elif event.button == 1:
+            self.updateCursor(x,y)
+
+
+    def finish(self, ):
+        """
+            Ends threshold picking and delegates thresholds to
+            markSpikes(). If only one threshold was selected, the absolute
+            value of it serves as the upper threshold and the negative absolute
+            serves as the lower threshold.
+        """
+        thresholds = self.thresholds
+        if len(thresholds) > 0:
+            self.crossHor.remove()
+
+            for line in self.threshLines:
+                line.remove()
+
+            if len(thresholds) == 1:
+                thresh = thresholds[0]
+                self.gui.markSpikes(max=abs(thresh), min=-abs(thresh))
+            elif len(thresholds) == 2:
+                self.gui.markSpikes(max=max(thresholds), min=min(thresholds))
+
+            self.window.canvas.draw()
+            self.gui.activatePan()
+            self.restoreCursor()
+
+        self.window.fig.canvas.mpl_disconnect(self._getter)
+        self.window.fig.canvas.mpl_disconnect(self._setter)
+        self.window.fig.canvas.mpl_disconnect(self._cursorSetter)
+        del self
+        
+
+
 class Combo(QtGui.QComboBox):
     def __init__(self, parent=None):
         super(Combo, self).__init__(parent=None)
@@ -1670,520 +3034,6 @@ class Combo(QtGui.QComboBox):
         self.isGlobal   = False
         self.attribute  = None
         self.plotName   = None
-
-
-
-class MplLinestyleDialog(QtGui.QDialog):
-    def __init__(self, parent=None, plotFamilies=None, colormaps=None):
-        """
-        plotFamilies must be in the format
-            plotFamilies = {
-                'familyName1': {
-                    plot1, plot2, plot3, ...},
-                'familyName2': {
-                    plot1, plot2, plot3, ...},
-                ...}
-        Where plotx is an object with the attributes
-            - name
-            - linestyle
-            - linewidth
-            - marker
-            - color
-            - colormap
-        colormaps must be in the format
-            colormaps = {
-                'familyName1': 'colormap1',
-                ...}
-        """
-        super(MplLinestyleDialog,self).__init__(parent)
-
-        self.oldStyle   = {}
-        self.families   = plotFamilies
-        self.combos        = []
-        self.comboColormaps= {}
-        self.colorPatches  = {}
-        self.newStyle      = {}
-        self.attributes = ('linestyle','linewidth','color',
-                            'colormap','marker')
-
-        mainLayout       = QtGui.QVBoxLayout()
-        scrollContainer  = QtGui.QScrollArea()
-        familyContainer  = QtGui.QWidget()
-        self.familyLayout= QtGui.QGridLayout()
-        btnResetAll      = QtGui.QPushButton('Revert changes')
-        currentRow       = 0
-        familyNames      = sorted(plotFamilies.keys())
-
-        self.familyLayout.addWidget(QtGui.QLabel('Global'), currentRow, 0)
-        self.addAttributeCombo('linestyle', (currentRow,2), isGlobal=True)
-        self.addAttributeCombo('linewidth', (currentRow,3), isGlobal=True)
-        self.addAttributeCombo('marker', (currentRow,4), isGlobal=True)
-        currentRow += 1
-
-        for familyName in familyNames:
-            plotFamily   = plotFamilies[familyName]
-            lblFamily    = QtGui.QLabel(familyName)
-
-            self.familyLayout.addWidget(lblFamily, currentRow, 0, 1, 2)
-            self.familyLayout.addWidget(QtGui.QLabel('Color'), currentRow, 1)
-            self.familyLayout.addWidget(QtGui.QLabel('Linestyle'), currentRow, 2, 1, 2)
-            self.familyLayout.addWidget(QtGui.QLabel('Linewidth'), currentRow, 3, 1, 2)
-            self.familyLayout.addWidget(QtGui.QLabel('Marker'), currentRow, 4, 1, 2)
-            currentRow += 1
-
-            self.addAttributeCombo('linestyle', (currentRow,2), familyName, familywide=True)
-            self.addAttributeCombo('linewidth', (currentRow,3), familyName, familywide=True)
-            self.addAttributeCombo('marker', (currentRow,4), familyName, familywide=True)
-
-            colormap = colormaps[familyName]
-            self.addAttributeCombo('colormap', (currentRow,1), familyName, colormap)
-            currentRow += 1
-            
-            plotFamily = sorted(plotFamily, key= lambda x: x.name)
-            for plot in plotFamily:
-                self.addPlotName((currentRow,0), plot.name)
-                self.addColorPatch((currentRow,1), plot.name, plot.color)
-                self.addAttributeCombo('linestyle', (currentRow,2), plot.name, plot.linestyle)
-                self.addAttributeCombo('linewidth', (currentRow,3), plot.name, plot.linewidth)
-                self.addAttributeCombo('marker', (currentRow,4), plot.name, plot.marker)
-                currentRow += 1
-                
-            self.familyLayout.addWidget(QtGui.QWidget(), currentRow, 0)
-            currentRow += 1
-        
-        btnResetAll.clicked.connect(self.reset)
-
-        buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok
-                | QtGui.QDialogButtonBox.Cancel, QtCore.Qt.Horizontal)
-        buttonBox.addButton(btnResetAll, QtGui.QDialogButtonBox.ActionRole)
-        buttonBox.accepted.connect(self.accept)
-        buttonBox.rejected.connect(self.reject)
-
-        familyContainer.setMinimumSize(QtCore.QSize(600,700))
-        familyContainer.setLayout(self.familyLayout)
-        scrollContainer.setWidget(familyContainer)
-        mainLayout.addWidget(scrollContainer)
-        mainLayout.addWidget(buttonBox)
-        self.setLayout(mainLayout)
-
-        self.setWindowTitle('Advanced plot style management')
-
-
-    def changeAttribute(self, combo):
-        if combo.familywide:
-            family = combo.plotName
-            names = [p.name for p in self.families[family]]
-        if combo.isGlobal:
-            names = [p.name for family in self.families.values() for p in family]
-        else:
-            pass
-            #print "Combo is not a controller"
-
-        newValue = combo.currentText()
-        #print "New value:", newValue
-                
-        for _combo in self.combos:
-            isRightFamily    = _combo.plotName in names
-            isRightAttribute = _combo.attribute == combo.attribute
-            isController     = _combo.familywide or _combo.isGlobal
-            if combo.familywide:
-                if isRightAttribute and isRightFamily and not isController:
-                   ind = _combo.findText(newValue)
-                   _combo.setCurrentIndex(ind)
-            elif combo.isGlobal:
-                #print "Combo is global"
-                if isRightAttribute and not isController:
-                   ind = _combo.findText(newValue)
-                   _combo.setCurrentIndex(ind)
-
-
-    def _addCombo(self, attribute, pos, plotName, options, currentOption,
-            tooltips=None, familywide=False, isGlobal=False):
-        layout = self.familyLayout
-
-        combo = Combo()
-        combo.attribute = attribute
-        combo.plotName  = plotName
-        combo.setMinimumWidth(70)
-        if tooltips is not None:
-            for option, tooltip in zip(options, tooltips):
-                ind = combo.count()
-                combo.addItem(option, (plotName,))
-                ##### TO DO: TOOLTIPS ###
-        else:
-            for option in options:
-                combo.addItem(option, (plotName,))
-
-        if currentOption is None:
-            combo.insertItem(0, '', (plotName,))
-            combo.setCurrentIndex(0)
-        else:
-            currentOptionIndex = combo.findText(currentOption)
-            if currentOptionIndex == -1:
-                combo.addItem(currentOption, (plotName,))
-                currentOptionIndex = combo.count() - 1
-            combo.setCurrentIndex(currentOptionIndex)
-
-        layout.addWidget(combo, *pos)
-
-        if familywide:
-            combo.familywide = True
-        if isGlobal:
-            combo.isGlobal   = True
-        
-        self.combos.append(combo)
-
-        return combo
-
-    
-    def addPlotName(self, pos, plotName):
-        lblName = QtGui.QLabel(plotName)
-        self.familyLayout.addWidget(lblName, *pos)
-
-
-    def style(self):
-        for plotName, patch in self.colorPatches.iteritems():
-            color = self._pyqt2mplColor(patch.color)
-            if 'color' not in self.newStyle:
-                self.newStyle['color'] = {plotName: color}
-            else:
-                self.newStyle['color'].update({plotName: color})
-
-        for combo in self.combos:
-            ind      = combo.currentIndex()
-            value    = str(combo.itemText(ind))
-            attribute= combo.attribute
-            plotName = combo.plotName
-            if combo.isGlobal or combo.familywide:
-                continue
-            
-            if attribute not in self.newStyle:
-                self.newStyle[attribute] = {plotName: value}
-            else:
-                self.newStyle[attribute].update({plotName: value})
-        return self.newStyle
-
-
-    @pyqtSlot()
-    def changeColormap(self, familyName):
-        family       = self.families[familyName]
-        combo        = self.comboColormaps[familyName]
-        plotsInFamily= sorted([plot.name for plot in family])
-        plotNumber   = len(plotsInFamily)
-
-        colormapName = str(combo.itemText(combo.currentIndex()))
-        cmap         = getattr(cm, colormapName)
-        colors       = cmap(np.linspace(0,1,plotNumber))
-        colorPatches = [self.colorPatches[plotName] for plotName in plotsInFamily]
-        
-        for patch, color in zip(colorPatches,colors):
-            color = [c*255 for c in color]
-            patch.setColor(color, 'rgb')
-
-
-    def resetColors(self):
-        colors       = self.oldStyle['color']
-        colorPatches = self.colorPatches
-        for plotName, color in colors.iteritems():
-            color = [c*255 for c in color]
-            patch = colorPatches[plotName]
-            patch.setColor(color, 'rgb')
-
-
-    def addColorPatch(self, pos, plotName, color):
-        patch = ColorPatch(color)
-        patch.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.familyLayout.addWidget(patch, *pos)
-
-        patch.clicked.connect(functools.partial(self.changeColor,patch,plotName))
-
-        if 'color' not in self.oldStyle:
-            self.oldStyle['color'] = {}
-        self.oldStyle['color'][plotName] = color
-        self.colorPatches[plotName] = patch
-    
-
-    def _pyqt2mplColor(self, pyqtColor):
-        isHex = False
-        try:
-            isHex = pyqtColor.startswith('#')
-        except AttributeError:
-            pass
-
-        if isHex:
-            color = mpl.colors.colorConverter.to_rgb(pyqtColor)
-            red, green, blue = color
-        else:
-            red   = pyqtColor.red()/255.
-            blue  = pyqtColor.blue()/255.
-            green = pyqtColor.green()/255.
-        return (red,green,blue)
-        
-    
-    @pyqtSlot('PyQt_PyObject','PyQt_PyObject')
-    def changeColor(self, patch, plotName):
-        dialog = QtGui.QColorDialog()
-        dialog.setWindowState(dialog.windowState() & ~QtCore.Qt.WindowMinimized | QtCore.Qt.WindowActive)
-        dialog.activateWindow()
-        color = dialog.getColor()
-        if not QColor.isValid(color):
-            logging.error('Picked color is not valid')
-            return
-
-        patch.setColor(color)
-
-
-    def addAttributeCombo(self, attribute, pos, plotName=None, currentStyle=None, familywide=False,
-            isGlobal=False, styles=None, tooltips=None):
-        if styles is None:
-            if attribute == 'linestyle':
-                styles = ('None','-','--','-.',':')
-                tooltips = ('No line','Solid','Dashed','Dashdot','Dotted')
-
-            elif attribute == 'linewidth':
-                styles = [str(el) for el in range(1,30)]
-
-            elif attribute == 'marker':
-                styles = ('None','.',',','o','v','^','<','>',\
-                                '8','s','p','P','*','h','H','+','x',\
-                                'X','D','d','|','_')
-                tooltips = ('No marker', 'Dot', 'Pixel', 'Circle',\
-                            'Triangle down','Triangle up','Triangle left',\
-                            'Triangle right','Octagon','Square','Pentagon',\
-                            'Plus','Star','Hexagon 1', 'Hexagon 2', 'Plus',\
-                            'X', 'X (filled)', 'Diamond', 'Thin diamond',\
-                            'Vertical line', 'Horizontal line')
-            elif attribute == 'colormap':
-                styles = sorted(['gist_rainbow','viridis', 'plasma', 'inferno', 'magma',
-                        'Greys', 'Purples', 'Blues', 'Greens', 'Oranges', 'Reds',
-                        'YlOrBr', 'YlOrRd', 'OrRd', 'PuRd', 'RdPu', 'BuPu', 'GnBu',
-                        'PuBu', 'YlGnBu', 'PuBuGn', 'BuGn', 'YlGn', 'binary',
-                        'gist_yarg', 'gist_gray', 'gray', 'bone', 'pink', 'spring',
-                        'summer', 'autumn', 'winter', 'cool', 'Wistia', 'hot',
-                        'afmhot', 'gist_heat', 'copper', 'PiYG', 'PRGn', 'BrBG',
-                        'PuOr', 'RdGy', 'RdBu', 'RdYlBu', 'RdYlGn', 'Spectral',
-                        'coolwarm', 'bwr', 'seismic', 'Pastel1', 'Pastel2', 'Paired',
-                        'Accent', 'Dark2', 'Set1', 'Set2', 'Set3', 'flag', 'prism', 'ocean', 'gist_earth',
-                        'terrain', 'gist_stern', 'gnuplot', 'gnuplot2', 'CMRmap',
-                        'cubehelix', 'brg', 'hsv', 'rainbow', 'jet', 'nipy_spectral',
-                        'gist_ncar'])
-            else:
-                print "Available styles for {} must be specified".format(attribute)
-                return
-
-        combo = self._addCombo(attribute, pos, plotName, styles, currentStyle,
-                tooltips, familywide, isGlobal)
-
-        if familywide or isGlobal:
-            combo.currentIndexChanged.connect(functools.partial(self.changeAttribute, combo))
-
-        if attribute == 'colormap':
-            familyName = plotName
-            combo.currentIndexChanged.connect(
-                    functools.partial(self.changeColormap, familyName))
-            combo.setMinimumWidth(150)
-            self.comboColormaps[familyName] = combo
-        else:
-            combo.setMinimumWidth(70)
-
-        if attribute not in self.oldStyle:
-            self.oldStyle[attribute] = {}
-        self.oldStyle[attribute][plotName] = currentStyle
-
-        return combo
-
-
-    def reset(self, attribute=None):
-        self.resetCombos(attribute)
-        self.resetColors()
-
-
-    def resetCombos(self, attribute=None):
-        if attribute is None or not attribute:
-            attributes = self.attributes
-        else:
-            attributes = [attribute]
-
-        for combo in self.combos:
-            attr     = combo.attribute
-            plotName = combo.plotName
-            
-            if attr in attributes:
-                originalValue = self.oldStyle[attr][plotName]
-                if originalValue == None:
-                    originalValue = ''
-                ind = combo.findText(originalValue)
-                combo.setCurrentIndex(ind)
-
-        for family, colormap in self.oldStyle['colormap'].iteritems():
-            comboColormap = self.comboColormaps[family]
-            comboColormap.setCurrentIndex(comboColormap.findText(colormap))
-
-
-    @staticmethod
-    def getStyles(parent = None, family = None, colormaps = None):
-        if family is None or colormaps is None:
-            print "Plot family and colormaps must be specified"
-            return {}
-        dialog = MplLinestyleDialog(parent, family, colormaps)
-        result = dialog.exec_()
-        style = dialog.style()
-        return (style, result == QtGui.QDialog.Accepted)
-
-
-
-class SteadyStateDialog(QtGui.QDialog):
-    def __init__(self, parent=None):
-        super(SteadyStateDialog,self).__init__(parent)
-
-        layout = QtGui.QFormLayout()
-        self.lblThreshold  = QtGui.QLabel('Threshold temperature deviation')
-        self.lblTimeRange  = QtGui.QLabel('Take the last ... minutes as reference')
-        self.editThreshold = QtGui.QLineEdit()
-        self.editTimeRange = QtGui.QLineEdit()
-        try:
-            self.editThreshold.setText(str(parent.steadyStateThreshold))
-            self.editTimeRange.setText(str(parent.steadyStateTimeRange))
-        except AttributeError:
-            pass
-
-        buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok
-                | QtGui.QDialogButtonBox.Cancel, QtCore.Qt.Horizontal)
-        buttonBox.accepted.connect(self.accept)
-        buttonBox.rejected.connect(self.reject)
-
-        layout.addRow(self.lblThreshold, self.editThreshold)
-        layout.addRow(self.lblTimeRange, self.editTimeRange)
-        layout.addRow(buttonBox)
-
-        self.setLayout(layout)
-        self.setWindowTitle('Change steady state definition')
-
-    def definition(self):
-        threshold = self.editThreshold.text()
-        timerange = self.editTimeRange.text()
-        return threshold, timerange
-
-    @staticmethod
-    def getDefinition(parent = None):
-        dialog = SteadyStateDialog(parent)
-        result = dialog.exec_()
-        thresh, time = dialog.definition()
-        return (thresh, time, result == QtGui.QDialog.Accepted)
-        
-
-
-class AxesLimitsDialog(QtGui.QDialog):
-    def __init__(self, parent=None):
-        super(AxesLimitsDialog,self).__init__(parent)
-
-        layout = QtGui.QFormLayout()
-        self.lblxminDate  = QtGui.QLabel('From:')
-        self.lblxmaxDate  = QtGui.QLabel('To:')
-        self.lblymin  = QtGui.QLabel('ymin:')
-        self.lblymax  = QtGui.QLabel('ymax:')
-        self.lblcb    = QtGui.QLabel('Save limits')
-        self.lblSaveLabel    = QtGui.QLabel('Save under label:')
-
-        self.editxminDate = QtGui.QDateTimeEdit()
-        self.editxmaxDate = QtGui.QDateTimeEdit()
-        self.editymin = QtGui.QLineEdit()
-        self.editymax = QtGui.QLineEdit()
-        self.cbSave   = QtGui.QCheckBox()
-        self.editSaveLabel = QtGui.QLineEdit()
-
-        now = datetime.datetime.now()
-        dt  = datetime.timedelta(minutes=10)
-        self.editxminDate.setDateTime(now-dt)
-        self.editxmaxDate.setDateTime(now)
-        
-        buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok
-                | QtGui.QDialogButtonBox.Cancel, QtCore.Qt.Horizontal)
-        buttonBox.accepted.connect(self.accept)
-        buttonBox.rejected.connect(self.reject)
-
-        layout.addRow(self.lblxminDate, self.editxminDate)
-        layout.addRow(self.lblxmaxDate, self.editxmaxDate)
-        layout.addRow(self.lblymin, self.editymin)
-        layout.addRow(self.lblymax, self.editymax)
-        layout.addRow(self.lblcb,   self.cbSave)
-        layout.addRow(self.lblSaveLabel,   self.editSaveLabel)
-        layout.addRow(buttonBox)
-
-        self.setLayout(layout)
-        self.setWindowTitle('Set window limits')
-
-    @staticmethod
-    def validate(val):
-        try:
-            val = float(val)
-        except:
-            val = None
-        return val
-
-    
-    def saveState(self):
-        return self.cbSave.isChecked(), self.editSaveLabel.text()
-
-
-    def limits(self):
-        xminDate = self.editxminDate.dateTime().toPyDateTime()
-        xmaxDate = self.editxmaxDate.dateTime().toPyDateTime()
-        xmin = mpl.dates.date2num(xminDate)
-        xmax = mpl.dates.date2num(xmaxDate)
-        ymin = self.editymin.text()
-        ymax = self.editymax.text()
-        return xmin, xmax, ymin, ymax
-
-
-    @staticmethod
-    def getLimits(parent = None):
-        dialog = AxesLimitsDialog(parent)
-        result = dialog.exec_()
-        xmin, xmax, ymin, ymax = [dialog.validate(val) for val in dialog.limits()]
-        save, label = dialog.saveState()
-        return ([xmin, xmax], [ymin, ymax], [save, label], result == QtGui.QDialog.Accepted)
-        
-
-
-class AverageDialog(QtGui.QDialog):
-    def __init__(self, parent=None):
-        super(AverageDialog,self).__init__(parent)
-
-        layout = QtGui.QFormLayout()
-        self.lblPoints  = QtGui.QLabel('Number of points to average over')
-        self.lblMethod  = QtGui.QLabel('Numpy method used for averaging')
-        self.editPoints = QtGui.QLineEdit()
-        self.editMethod = QtGui.QLineEdit()
-        try:
-            self.editPoints.setText(str(parent._points))
-            self.editMethod.setText(str(parent._averageMethod))
-        except AttributeError:
-            pass
-
-        buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok
-                | QtGui.QDialogButtonBox.Cancel, QtCore.Qt.Horizontal)
-        buttonBox.accepted.connect(self.accept)
-        buttonBox.rejected.connect(self.reject)
-
-        layout.addRow(self.lblPoints, self.editPoints)
-        layout.addRow(self.lblMethod, self.editMethod)
-        layout.addRow(buttonBox)
-
-        self.setLayout(layout)
-        self.setWindowTitle('Data averaging')
-
-    def definition(self):
-        points = int(self.editPoints.text())
-        method = str(self.editMethod.text())
-        return points, method
-
-    @staticmethod
-    def getSettings(parent = None):
-        dialog = AverageDialog(parent)
-        result = dialog.exec_()
-        points, method = dialog.definition()
-        return (points, method, result == QtGui.QDialog.Accepted)
 
 
 
@@ -2221,834 +3071,9 @@ class ColorPatch(QtGui.QWidget):
 
 
 
-class Window(QtCore.QObject):
-    global mode
-    global fileMode
-    progress = pyqtSignal('PyQt_PyObject','PyQt_PyObject','PyQt_PyObject')
-    track    = pyqtSignal()
-    doneSig  = pyqtSignal()
-
-    def __init__(self, gui):
-        super(Window,self).__init__()
-        self.fig = Figure()
-        self.canvas = FigureCanvas(self.fig)
-        self.ax = self.fig.add_subplot(111)
-
-        self.canvas.setFocusPolicy( QtCore.Qt.ClickFocus )
-        self.canvas.setFocus()
-
-        self.sensors = []
-        self.spikes  = []
-        self.dups    = []
-        self.dupLines= []
-        self.graphs  = {}
-        self.colors  = {}
-        self.data    = {}
-        self.compareAx   = None
-        self.compareLims = None
-        self.marker  = '+'
-
-        self.ax.xaxis_date()
-        self.updateTicks()
-
-        self.ax.set_xlabel('Time')
-        self.ax.set_ylabel('Sensor temperature [$^\circ$C]')
-
-        self.updateThread = updateThread()
-        self.freqThread = DataFrequencyThread(gui, self.updateThread)
-        self.gui = gui
-        self.fig.canvas.mpl_connect('motion_notify_event',self.onMove)
-        self.fig.canvas.mpl_connect('button_release_event',self.onRelease)
-
-
-    def updateAverage(self, points, method):
-        """
-        Averages the data points on the canvas over intervals with `points`
-        points using the numpy method `method` by delegating the graph data to
-        `update()`. If applied successively, the averaging effects will add to
-        each other: Averaging over 5 and then over 2 points will effectively
-        average the original data over 10 points. The original data can be
-        restored using `restore()`.
-
-        Receives:
-            integer     `points`    Number of data points to average over
-            string      `method`    Numpy method to use for averaging
-        Returns:
-            None
-        """
-        for sensor, graph in self.graphs.iteritems():
-            x = graph.get_xdata()
-            y = graph.get_ydata()
-
-            try:
-                x, y = self.average(x, y, points, method)
-            except AttributeError, e:
-                print str(e)
-
-            graph.set_xdata(x)
-            graph.set_ydata(y)
-        
-        self.ax.draw_artist(self.ax.patch)
-        for graph in self.graphs.values():
-            self.ax.draw_artist(graph)
-
-        self.ax.grid(True)
-        self.canvas.update()
-        self.canvas.flush_events()
-
-
-    def restore(self):
-        """
-        Restores the original data points. This method can be used to undo
-        averaging after using `averagePlot`.
-        
-        Receives:
-            None
-        Returns:
-            None
-        """
-        for sensor, sensorData in self.data.iteritems():
-            x, y = sensorData
-
-            graph = self.graphs[sensor]
-            graph.set_xdata(x)
-            graph.set_ydata(y)
-        
-        self.ax.draw_artist(self.ax.patch)
-        for graph in self.graphs.values():
-            self.ax.draw_artist(graph)
-
-        self.ax.grid(True)
-        self.canvas.update()
-        self.canvas.flush_events()
-
-
-    def average(self, x, y, points, method='mean'):
-        """ 
-        Bins `x` and `y` into bins comprising `points` points. 
-        
-        Receives:
-        args
-            numpy array `x`         Array to be binned
-            numpy array `y`         Array to be binned
-            integer     `points`    Number of point over which to average
-        kwargs
-            string      `method`    Numpy method to use for averaging. 
-                                    Default: 'mean'
-
-        Returns:
-            numpy array `avgx`      Binned array
-            numpy array `avgy`      Binned array
-        """
-        bins = x.size/points
-        rest = x.size%points
-        avgx = np.zeros(bins+1)
-        avgy = np.zeros(bins+1)
-        
-        method = getattr(np, method)
-        
-        j = 0
-        for i in range(bins):
-            avgx[i] = method(x[j:j+points])
-            avgy[i] = method(y[j:j+points])
-            j += points
-
-        avgx[-1] = method(x[-rest:])
-        avgy[-1] = method(y[-rest:])
-
-        return avgx, avgy
-
-
-    def getTVACambientTemperatures(self):
-        file = QtGui.QFileDialog.getOpenFileName(self.gui, 
-                'Choose TVAC temperature source file')
-
-        ok = os.path.isfile(file)
-        if ok:
-            with open(file, 'r') as f:
-                lines = f.readlines()
-                
-            lines = lines[1:]
-            size = len(lines)
-            sets  = np.zeros(size)
-            temps = np.zeros(size)
-            datetimes = np.zeros(size)
-            setsFiltered = []
-            datetimesFiltered = []
-
-            self.track.emit()
-            print "Getting TVAC temperatures"
-            for i, line in enumerate(lines):
-                if i%5 == 0:
-                    self.progress.emit(size, i, 
-                            "Getting TVAC temperatures (line {} of {})".format(i, size))
-
-                cols = [el.replace(',','.') for el in line.split()]
-                date = cols[0]
-                time = cols[1].split('.')[0]
-                tempSet = cols[2]
-                tempIs  = cols[3]
-
-                datefmt ='%d.%m.%Y %H:%M:%S'
-                dtime   = datetime.datetime.strptime(date + ' ' + time, datefmt)
-                dtime   = mpl.dates.date2num(dtime)
-
-                sets[i]      = tempSet
-                temps[i]     = tempIs
-                datetimes[i] = dtime
-            self.doneSig.emit()
-
-            # Filter temperature setting data to only contain the first and
-            # last point of a constant setting to save processor time when
-            # plotting
-            for i, val in enumerate(sets):
-                if i+1 == sets.size:
-                    break
-                if sets[i+1] != sets[i]:
-                    setsFiltered.append(sets[i])
-                    setsFiltered.append(sets[i+1])
-                    datetimesFiltered.append(datetimes[i])
-                    datetimesFiltered.append(datetimes[i+1])
-                    
-            setsFiltered      = np.array(setsFiltered)
-            datetimesFiltered = np.array(datetimesFiltered)
-
-            return (datetimes, temps), (datetimesFiltered, setsFiltered)
-
-
-    def zoomOut(self, ax):
-        """
-        This function ensures that all plots in the Axes object `ax` are
-        visible and zooms to the y-values in the shown range. Finds
-        corresponding axes limits. Sets object attribute `compareLims` to the
-        found values and sets the ylims of `ax` to `compareLims`. This function
-        only considers Line2D objects (no scatter plots).
-
-        Receives:
-            Matplotlib Axes instance    ax      The axes to be zoomed to
-                                                contents
-        Returns:
-            None
-        """
-        xmin, xmax = ax.xaxis.get_view_interval()
-        data = []
-        for line in ax.lines:
-            isSetting = str(line.get_label())=='setting'
-            if line.get_visible() and not isSetting:
-                xdata = line.get_xdata()
-                ydata = line.get_ydata()
-                data.append(list(ydata[np.logical_and( xmin <= xdata, xdata <= xmax)]))
-
-        data = [float(item) for sublist in data for item in sublist]
-        if len(data) == 0:
-            return
-        miny, maxy = [min(data), max(data)]
-
-        if miny > 0:
-            miny *= 0.95
-        else:
-            miny *= 1.05
-        if maxy > 0:
-            maxy *= 1.05
-        else:
-            maxy *= 0.95
-
-        self.compareLims = (miny, maxy)
-            
-        ax.set_ylim(self.compareLims, emit=False)
-        
-
-    def setCompareAxis(self, quantity):
-        """
-        Creates second Axes object that has a common x-axis with the main Axes.
-        Draws the quantity `quantity` in these Axes.
-        
-        Receives:
-            string      quantity    The quantity to be drawn in the second Axes
-                                    object
-        Returns:
-            None
-        """
-        quantity = str(quantity)
-        if self.compareAx is not None:
-            self.compareAx.remove()
-            self.compareAx = None
-            self.canvas.draw()
-        if quantity in (None, 'none', 'None'):
-            return
-        
-        self.compareAx = self.ax.twinx()
-        self.compareAx.callbacks.connect('ylim_changed', self.zoomOut)
-
-        if quantity == 'TVAC temperature':
-            result = self.getTVACambientTemperatures()
-            if result is None:
-                return
-            (times, temps), (setTimes, settings) = result
-            self.compareAx.plot(times,temps, color='black')
-            self.compareAx.plot(setTimes,settings, color='black', ls='--', label='setting')
-
-            self.compareAx.set_ylabel('TVAC temperature [$^\circ$C]')
-            self.zoomOut(self.compareAx)
-        else:
-            print "Didn't recognize quantity"
-        self.canvas.draw()
-
-
-    def applyTimeZone(self, tzDelta):
-        """
-        Shifts all plotted lines in x-direction by `tzDelta` hours.
-
-        Receives:
-            integer     tzDelta     Number of hours by which all plots should
-                                    be shifted in x-direction
-        Returns:
-            None
-        """
-        for line in self.ax.lines:
-            times = line.get_xdata()
-            times = [mpl.dates.date2num(mpl.dates.num2date(time)
-                                            + datetime.timedelta(hours=tzDelta))
-                        for time in times]
-            line.set_xdata(times)
-        self.canvas.draw()
-
-
-    def onMove(self, event):
-        if event.inaxes:
-            x = event.xdata
-            y = event.ydata
-            prettyDate = str(mpl.dates.num2date(x)).split('.')[0]
-            self.gui.statusbar.showMessage(u'x = {}, y = {:.1f}\u00b0C'.format(prettyDate,y))
-        else:
-            self.gui.statusbar.clearMessage()
-
-
-    def onRelease(self, event):
-        if self.gui.toolbar._active == 'ZOOM':
-            self.gui.toolbar.release_zoom(event)
-        elif self.gui.toolbar._active == 'PAN':
-            self.gui.toolbar.release_pan(event)
-        self.updateTicks()
-        # This is necessary so ticks will be refreshed after releasing
-        # mouse -.-
-        p, = self.ax.plot(range(10))
-        p.remove()
-        self.fig.canvas.draw()
-        p, = self.ax.plot(range(10))
-        p.remove()
-        self.fig.canvas.draw()
-
-
-    def toggleSensors(self, selectedSensors):
-        for sensor in self.sensors:
-            selected = sensor.name in selectedSensors
-            plotted  = sensor.name in self.graphs
-            if plotted:
-                graph = self.graphs[sensor.name]
-            else:
-                print 'Sensor without graph encountered: {}'.format(sensor.name)
-                logging.error(
-                    "Graph for sensor {} seems to not have been initialized."\
-                    .format(sensor.name))
-
-            visible  = graph.get_visible()
-            if selected and not visible:
-                graph.set_visible(True)
-            if not selected and visible:
-                graph.set_visible(False)
-
-        self.canvas.draw()
-
-
-    def str2mpldate(self, str):
-        if fileMode or mode == 'simulation':
-            # str should already be a mpl date in this case
-            return str
-        time = datetime.datetime.strptime(str, '%Y-%m-%dT%H:%M:%S')
-
-        # Convert time zones (UTC --> local)
-        time = time + datetime.timedelta(hours=self.gui.timeZone)
-        return mpl.dates.date2num(time)
-
-    
-    def initGraphs(self, data):
-        logging.info("Initializing graphs")
-        self.graphs = {}
-
-        for sensorData in data:
-            sensor = sensorData[0]
-            if sensor in 'THM System State':
-                continue
-            x = sensorData[1]
-            y = sensorData[2]
-
-            self.sensors.append(Sensor(sensor))
-
-            try:
-                y = float(y)
-            except ValueError:
-                y = np.nan
-            except TypeError:
-                print "{} cannot be converted to float.".format(y) +\
-                "Argument must be a string or a number"
-                y = np.nan
-
-            timestamp = self.str2mpldate(x)
-            self.graphs[sensor] = self.ax.plot_date([timestamp],[y])[0]
-
-        self.sensors = sorted(self.sensors, key = lambda x: x.name)
-        self.subsystems = sorted(list(set([s.subsystem for s in self.sensors])))
-
-        self.assignColors()
-
-        self.updateTicks()
-        showGrid = self.gui.cbShowGrid.isChecked()
-        if showGrid:
-            self.ax.grid(True)
-        self.canvas.draw()
-
-
-    def assignColors(self):
-        colorsBySubsystem = {}
-        self.colormaps = {
-                'ADCS': 'gist_rainbow',
-                'CDH':  'summer',
-                'COM':  'autumn',
-                'Payload':  'inferno',
-                'EPS':  'winter'}
-
-        for sensor in self.sensors:
-            sub = sensor.subsystem
-            sensorsInSub = len([s for s in self.sensors if s.subsystem == sub])
-            if sub in self.colormaps:
-                colormap = getattr(cm, self.colormaps[sub])
-            else:
-                print "No colormap specified for subsystem {}. ".format(sub)+\
-                        "Using gist_rainbow."
-                colormap = getattr(cm, 'gist_rainbow')
-            colorsBySubsystem[sub] = colormap(np.linspace(0,1,sensorsInSub))
-
-        self.colors = {}
-        for sub in self.subsystems:
-            colors = colorsBySubsystem[sub]
-            subsystemSensors = [s for s in self.sensors if s.subsystem == sub]
-            for sensor, color in zip(subsystemSensors, colors):
-                self.colors[sensor.name] = color
-
-        for sensor, graph in self.graphs.iteritems():
-            graph.set_color(self.colors[sensor])
-
-
-    def goLive(self):
-        logging.info("Starting data retrieval")
-        self.gui.disconnect(self.updateThread, 
-                            SIGNAL('refresh_feed(PyQt_PyObject)'), 
-                            self.update)
-        self.gui.disconnect(self.updateThread, 
-                            SIGNAL('finished()'), 
-                            self.done)
-        self.gui.disconnect(self.updateThread, 
-                            SIGNAL('plot_all(PyQt_PyObject)'), 
-                            self.plotAll)
-        self.gui.disconnect(self.updateThread, 
-                            SIGNAL('discard_data()'), 
-                            self.clear)
-        try:
-            self.updateThread.duplicatesReady.disconnect(self.gui.receiveDuplicates)
-        except TypeError:
-            pass
-
-        self.gui.connect(self.updateThread, 
-                            SIGNAL('refresh_feed(PyQt_PyObject)'), 
-                            self.update)
-        self.gui.connect(self.updateThread, 
-                            SIGNAL('finished()'), 
-                            self.done)
-        self.gui.connect(self.updateThread, 
-                            SIGNAL('plot_all(PyQt_PyObject)'), 
-                            self.plotAll)
-        self.gui.connect(self.updateThread, 
-                            SIGNAL('discard_data()'), 
-                            self.clear)
-        self.updateThread.duplicatesReady.connect(self.gui.receiveDuplicates)
-
-        self.updateThread.start()
-        self.freqThread.start()
-
-
-    def done(self):
-        logging.info("Data retrieval stopped")
-
-
-    def started(self):
-        logging.info("Data retrieval started")
-
-
-    def stahp(self):
-        if self.updateThread.isFinished():
-            self.gui.statusbar.showMessage("The thread has already stopped, stop hitting the stop button!", 2000)
-            return
-        logging.info("Stopping data retrieval")
-        self.updateThread.quit()
-        self.updateThread.terminate()
-        self.freqThread.quit()
-        self.freqThread.terminate()
-        self.gui.statusbar.showMessage('Feed stopped', 2000)
-
-
-    def getSelectedSensors(self):
-        if hasattr(self.gui,'checkBoxes'):
-            selectedSensors =  [sensor \
-                                for sensor,cb in self.gui.checkBoxes.iteritems() \
-                                if cb.isChecked()]
-        else:
-            selectedSensors = [s.name for s in self.sensors]
-        return selectedSensors
-
-
-    def plotAll(self, plotData):
-        """ Plots all data from a file instantly """
-        self.ax.clear()
-        for x in self.dups:
-            self.dupLines.append(self.ax.axvline(x,0,1,color='grey',ls='--'))
-        
-        self.sensors = [Sensor(name) for name in sorted(plotData.keys())]
-        self.subsystems = sorted(list(set([s.subsystem for s in self.sensors])))
-        amountSensors= len(self.sensors)
-
-        self.track.emit()
-        #print "Plotting graphs"
-        size = len(plotData)
-        for i, (sensor, data) in enumerate(plotData.iteritems()):
-            self.progress.emit(size, i, "Plotting graph ({})".format(sensor))
-            x, y = data
-            graph = self.ax.plot_date(x,y,
-                                        marker=self.marker,
-                                        ls='solid')[0]
-            self.graphs[sensor] = graph
-        self.doneSig.emit()
-
-        self.assignColors()
-        
-        if self.gui.sensorTable.rowCount() == 0:
-            self.gui.populateSensorTable(self.sensors)
-                
-        if self.gui.cbShowGrid.isChecked():
-            self.ax.grid(True)
-        else:
-            self.ax.grid(False)
-
-        self.data = plotData
-        self.gui.zoom('all')
-        self.canvas.draw()
-
-
-    def update(self, data, live=True):
-        """ 
-        Append data and re-draw canvas. This method is only invoked in live mode
-        """
-        if len(self.graphs) == 0:
-            self.initGraphs(data)
-
-        selectedSensors = self.getSelectedSensors()
-
-        xtot    = []
-        ytot    = []
-        oldxLim     = self.ax.get_xlim()
-        oldyLim     = self.ax.get_ylim()
-        fixedView   = not self.gui.cbAutoUpdate.isChecked()
-        try:
-            xLimit  = float(self.gui.editWindowWidth.text())
-        except:
-            xLimit  = None
-        
-        for sensorData in data:
-            sensor  = sensorData[0]
-            newx    = sensorData[1]
-            newy    = sensorData[2]
-            if sensor == 'THM System State':
-                if newy == 1:
-                    logging.warning('SYSTEM IN WARNING STATE')
-                    self.gui.warning(newy)
-                elif newy == 2:
-                    logging.warning('!!!!!! SYSTEM IN CRITICAL STATE !!!!!!')
-                    self.gui.warning(newy)
-                continue
-
-            selected = sensor in selectedSensors
-            graph   = self.graphs[sensor]
-            oldData = graph.get_xydata()
-
-            try:
-                newy = float(newy)
-            except ValueError:
-                newy = np.nan
-            newx = self.str2mpldate(newx)
-
-            if len(oldData) == 0:
-                x = [newx]
-                y = [newy]
-            else:
-                x = [_x for _x,_ in oldData]
-                x.append(newx)
-                y = [_y for _,_y in oldData]
-                y.append(newy)
-
-                if live:
-                    self.checkSteadyState(sensor,x,y)
-            # This might lead to problems if the program has been running for
-            # a long time and xtot gets huge. Consider reducing it to unique
-            # values
-            xtot.extend(x)
-            ytot.extend(y)
-
-            # Sort data by time so lines between points don't go crazy
-            x, y = zip(*sorted(zip(x,y)))
-
-            # Show current temperature values
-            # This has to happen after the arrays were chronologically sorted
-            try:
-                self.gui.tempLabels[sensor].setText('{:.1f}'.format(y[-1]) + u'\u00b0C')
-                self.gui.tempLabels[sensor].update()
-            except:
-                pass
-
-            try:
-                graph.remove()
-            except:
-                pass
-            marker = self.marker
-            if self.gui.cbShowLines.isChecked():
-                graph = self.ax.plot_date(x,y,
-                                    color=self.colors[sensor],
-                                    marker=marker,
-                                    ls='solid')[0]
-            else:
-                graph = self.ax.plot_date(x,y,
-                                    color=self.colors[sensor],
-                                    marker=None,
-                                    ls='none')[0]
-
-            if not selected:
-                graph.set_visible(False)
-
-            self.graphs[sensor] = graph
-
-        if fixedView:
-            self.ax.set_xlim(oldxLim)
-            self.ax.set_ylim(oldyLim)
-        else:
-            if min(xtot)==max(xtot):
-                date     = mpl.dates.num2date(max(xtot))
-                padLeft  = datetime.timedelta(minutes=5)
-                padRight = datetime.timedelta(minutes=1)
-                self.ax.set_xlim(date-padLeft,date+padRight)
-            else:
-                minDate  = mpl.dates.num2date(min(xtot))
-                maxDate = mpl.dates.num2date(max(xtot))
-                xmin    = mpl.dates.num2date(self.ax.get_xlim()[0])
-                if xLimit:
-                    range  = maxDate-xmin
-                    minutes = xLimit
-                    xLimit  = datetime.timedelta(minutes=minutes)
-                    if range > xLimit:
-                        maxDate+= datetime.timedelta(minutes = minutes/10 )
-                        self.ax.set_xlim([maxDate-xLimit,maxDate])
-                    else:
-                        padRight = (maxDate-xmin)/20
-                        self.ax.set_xlim(xmin,maxDate+padRight)
-                else:
-                    padRight = (maxDate-xmin)/20
-                    self.ax.set_xlim(xmin,maxDate+padRight)
-
-        if self.gui.sensorTable.rowCount() == 0:
-            self.gui.populateSensorTable(self.sensors)
-
-        if live:
-            self.updateTicks()
-            self.canvas.draw()
-
-
-    def getSensor(self, sensorName):
-        sensorList = [s for s in self.sensors if s.name == sensorName]
-        if len(sensorList) > 0:
-            sensor = sensorList[0]
-        else:
-            print "No sensor {} found".format(sensorName)
-            sensor = None
-        return sensor
-        
-
-    def checkSteadyState(self, sensor, times, data):
-        times       = [mpl.dates.num2date(time) for time in times]
-        threshold   = self.gui.steadyStateThreshold
-        dt          = datetime.timedelta(minutes=self.gui.steadyStateTimeRange)
-        inSteadyState = self.getSensor(sensor).steady
-        y = []
-
-        if sensor == 'THM System State':
-            return
-        for time, _y in zip(times,data):
-            if max(times)-dt < time <= max(times):
-                y.append(_y)
-
-        try:
-            if abs(min(y) - max(y)) < threshold:
-                if not inSteadyState:
-                    self.emit(SIGNAL('steady_state_changed(PyQt_PyObject, PyQt_PyObject)'), sensor, True)
-            else:
-                if inSteadyState:
-                    self.emit(SIGNAL('steady_state_changed(PyQt_PyObject, PyQt_PyObject)'), sensor, False)
-        except ValueError:
-            pass
-
-
-    def updateTicks(self, xmin=None, xmax=None):
-        dateFmtMajor, dateFmtMinor = self.getDateFormat(xmin, xmax)
-        self.ax.xaxis.set_major_formatter(dateFmtMajor)
-        self.ax.xaxis.set_minor_formatter(dateFmtMinor)
-        try:
-            self.fig.autofmt_xdate()
-        except RuntimeError:
-            locator = mpl.dates.AutoDateLocator()
-            self.ax.xaxis.set_minor_locator(locator)
-            self.ax.xaxis.set_major_locator(locator)
-            dateFmt = mpl.dates.AutoDateFormatter(locator)
-            self.ax.xaxis.set_major_formatter(dateFmt)
-            self.ax.xaxis.set_minor_formatter(dateFmt)
-            self.fig.autofmt_xdate()
-
-
-    def getDateFormat(self, xmin, xmax):
-        if xmin is None:
-            xmin = self.ax.get_xlim()[0]
-        if xmax is None:
-            xmax = self.ax.get_xlim()[1]
-        dateRange = mpl.dates.num2date(xmax) - mpl.dates.num2date(xmin)
-
-        maxMinutes = lambda x: datetime.timedelta(minutes=x)
-        seconds = lambda x: mpl.dates.SecondLocator(interval=x)
-        minutes = lambda x: mpl.dates.MinuteLocator(interval=x)
-        hours   = lambda x: mpl.dates.HourLocator(interval=x)
-        days    = lambda x: mpl.dates.DayLocator(interval=x)
-        months  = lambda x: mpl.dates.MonthLocator(interval=x)
-        years   = lambda x: mpl.dates.YearLocator(base=x)
-
-        if dateRange < maxMinutes(1):
-            self.ax.xaxis.set_minor_locator(seconds(10))
-            self.ax.xaxis.set_major_locator(seconds(30))
-            dateFmtMajor = mpl.dates.DateFormatter('%M:%S')
-            dateFmtMinor = mpl.dates.DateFormatter('%S')
-
-        elif dateRange < maxMinutes(20):
-            self.ax.xaxis.set_minor_locator(seconds(30))
-            self.ax.xaxis.set_major_locator(minutes(2))
-            dateFmtMajor = mpl.dates.DateFormatter('%H:%M:%S')
-            dateFmtMinor = mpl.dates.DateFormatter('%M:%S')
-
-        elif dateRange < maxMinutes(40):
-            self.ax.xaxis.set_minor_locator(minutes(2))
-            self.ax.xaxis.set_major_locator(minutes(5))
-            dateFmtMajor = mpl.dates.DateFormatter('%H:%M')
-            dateFmtMinor = mpl.dates.DateFormatter('%M:%S')
-
-        elif dateRange < maxMinutes(120):
-            self.ax.xaxis.set_minor_locator(minutes(10))
-            self.ax.xaxis.set_major_locator(minutes(20))
-            dateFmtMajor = mpl.dates.DateFormatter('%b %d %H:%M')
-            dateFmtMinor = mpl.dates.DateFormatter('%M:%S')
-
-        elif dateRange < maxMinutes(480):
-            self.ax.xaxis.set_minor_locator(minutes(15))
-            self.ax.xaxis.set_major_locator(minutes(30))
-            dateFmtMajor = mpl.dates.DateFormatter('%b %d %H:%M')
-            dateFmtMinor = mpl.dates.DateFormatter('%M:%S')
-
-        elif dateRange < maxMinutes(12*60):
-            self.ax.xaxis.set_minor_locator(minutes(30))
-            self.ax.xaxis.set_major_locator(hours(1))
-            dateFmtMajor = mpl.dates.DateFormatter('%Y-%m-%d %H:%M')
-            dateFmtMinor = mpl.dates.DateFormatter('%Hh')
-
-        elif dateRange < maxMinutes(24*60):
-            self.ax.xaxis.set_minor_locator(hours(1))
-            self.ax.xaxis.set_major_locator(hours(3))
-            dateFmtMajor = mpl.dates.DateFormatter('%Y-%m-%d %Hh')
-            dateFmtMinor = mpl.dates.DateFormatter('%Hh')
-
-        elif dateRange < maxMinutes(24*60*3):
-            self.ax.xaxis.set_minor_locator(hours(3))
-            self.ax.xaxis.set_major_locator(hours(12))
-            dateFmtMajor = mpl.dates.DateFormatter('%Y-%m-%d %Hh')
-            dateFmtMinor = mpl.dates.DateFormatter('%d %Hh')
-
-        elif dateRange < maxMinutes(24*60*10):
-            self.ax.xaxis.set_minor_locator(hours(12))
-            self.ax.xaxis.set_major_locator(days(1))
-            dateFmtMajor = mpl.dates.DateFormatter('%Y-%m-%d')
-            dateFmtMinor = mpl.dates.DateFormatter('%d %Hh')
-
-        elif dateRange < maxMinutes(24*60*365/12):
-            self.ax.xaxis.set_minor_locator(days(1))
-            self.ax.xaxis.set_major_locator(days(5))
-            dateFmtMajor = mpl.dates.DateFormatter('%Y-%m-%d')
-            dateFmtMinor = mpl.dates.DateFormatter('%d')
-
-        elif dateRange < maxMinutes(24*60*3*365/12):
-            self.ax.xaxis.set_minor_locator(days(1))
-            self.ax.xaxis.set_major_locator(days(10))
-            dateFmtMajor = mpl.dates.DateFormatter('%Y-%m-%d')
-            dateFmtMinor = mpl.dates.DateFormatter('%d')
-
-        elif dateRange < maxMinutes(24*60*365):
-            self.ax.xaxis.set_minor_locator(days(10))
-            self.ax.xaxis.set_major_locator(months(1))
-            dateFmtMajor = mpl.dates.DateFormatter('%Y-%m')
-            dateFmtMinor = mpl.dates.DateFormatter('')
-
-        elif dateRange < maxMinutes(24*60*365*3):
-            self.ax.xaxis.set_minor_locator(months(1))
-            self.ax.xaxis.set_major_locator(months(3))
-            dateFmtMajor = mpl.dates.DateFormatter('%Y-%m')
-            dateFmtMinor = mpl.dates.DateFormatter('')
-
-        else:
-            self.ax.xaxis.set_minor_locator(months(1))
-            self.ax.xaxis.set_major_locator(years(1))
-            dateFmtMajor = mpl.dates.DateFormatter('%Y')
-            dateFmtMinor = mpl.dates.DateFormatter('')
-
-        return dateFmtMajor, mpl.dates.DateFormatter('')
-
-
-    def clear(self):
-        """
-        Clears the window axes and resets all attributes that hold data related
-        to the plots.
-        
-        Receives:
-            None
-        Returns:
-            None
-        """
-        restart = False
-        if self.updateThread.isRunning():
-            self.stahp()
-            restart = True
-
-        self.ax.clear()
-        self.canvas.draw()
-        self.data = {}
-        self.graphs = {}
-        self.sensors = []
-        self.colors = {}
-
-        if restart:
-            self.goLive()
-
-
-
+##############################################################################
+# Main Application Loop
+##############################################################################
 if __name__ == '__main__':
     app = QtGui.QApplication(sys.argv)
     main = Monitor()
