@@ -2,6 +2,8 @@ dist
 build
 monitor.log
 monitor.spec
+monitor
+monitor32
 data
 *.pyc
 *.dat

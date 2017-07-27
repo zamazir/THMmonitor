@@ -313,11 +313,18 @@ color: rgb(0, 0, 0);</string>
      <addaction name="menuMarkSpikes"/>
      <addaction name="menuRemoveSpikeMarkers"/>
     </widget>
+    <widget class="QMenu" name="menuDuplicates">
+     <property name="title">
+      <string>Duplicates</string>
+     </property>
+     <addaction name="menuMarkDuplicates"/>
+     <addaction name="menuRemoveDupMarkers"/>
+    </widget>
     <addaction name="menuChangeAxesLimits"/>
     <addaction name="menuSaveCurrentLimits"/>
     <addaction name="menuChangeMarker"/>
     <addaction name="menuSpikes"/>
-    <addaction name="menuDeleteDuplicateLines"/>
+    <addaction name="menuDuplicates"/>
     <addaction name="menuAdvancedLinestyleSettings"/>
    </widget>
    <widget class="QMenu" name="menuData">
@@ -439,6 +446,16 @@ color: rgb(0, 0, 0);</string>
   <action name="menuAdvancedLinestyleSettings">
    <property name="text">
     <string>Advanced line style settings</string>
+   </property>
+  </action>
+  <action name="menuMarkDuplicates">
+   <property name="text">
+    <string>Mark duplicates</string>
+   </property>
+  </action>
+  <action name="menuRemoveDupMarkers">
+   <property name="text">
+    <string>Remove duplicate markers</string>
    </property>
   </action>
  </widget>

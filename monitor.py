@@ -1592,11 +1592,22 @@ class Window(QtCore.QObject):
         return selectedSensors
 
 
+    def markDuplicates(self):
+        for x in self.dups:
+            self.dupLines.append(self.ax.axvline(x,0,1,color='grey',ls='--'))
+        self.canvas.draw()
+
+
+    def removeDuplicateMarkers(self):
+        for marker in self.dupLines:
+            marker.remove()
+        self.dupLines = []
+        self.canvas.draw()
+
+
     def plotAll(self, plotData):
         """ Plots all data from a file instantly """
         self.ax.clear()
-        for x in self.dups:
-            self.dupLines.append(self.ax.axvline(x,0,1,color='grey',ls='--'))
         
         self.sensors = [Sensor(name) for name in sorted(plotData.keys())]
         self.subsystems = sorted(list(set([s.subsystem for s in self.sensors])))
@@ -2019,7 +2030,6 @@ class Monitor(QMainWindow, Ui_MainWindow):
         self.comboCompareTo.currentIndexChanged.connect(self.compareTo)
         self.alarmThread.flash.connect(self.showFlashScreen)
         self.alarmThread.stop.connect(self.stopAlarm)
-        self.menuDeleteDuplicateLines.triggered.connect(self.deleteDuplicates)
         self.menuAdvancedLinestyleSettings.triggered.connect(self.advancedLinestyleSettings)
 
         if not fileMode:
@@ -2028,11 +2038,14 @@ class Monitor(QMainWindow, Ui_MainWindow):
             self.menuAverage.setEnabled(False)
             self.menuNewData.setEnabled(False)
             self.menuRestore.setEnabled(False)
+            self.menuDuplicates.setEnabled(False)
         else:
             self.menuAddData.triggered.connect(self.addData)
             self.menuAverage.triggered.connect(self.averagePlot)
             self.menuNewData.triggered.connect(functools.partial(self.addData, True))
             self.menuRestore.triggered.connect(self.restorePlot)
+            self.menuMarkDuplicates.triggered.connect(self.markDuplicates)
+            self.menuRemoveDupMarkers.triggered.connect(self.removeDuplicateMarkers)
             self.menuChangeSteadyState.setEnabled(False)
 
         if not fileMode:
@@ -2072,12 +2085,12 @@ class Monitor(QMainWindow, Ui_MainWindow):
         self.window.dups = dups
         
 
-    def deleteDuplicates(self):
-        for line in self.window.dupLines:
-            try:
-                line.remove()
-            except ValueError:
-                pass
+    def markDuplicates(self):
+        self.window.markDuplicates()
+
+
+    def removeDuplicateMarkers(self):
+        self.window.removeDuplicateMarkers()
 
 
     def advancedLinestyleSettings(self):
@@ -2209,14 +2222,14 @@ class Monitor(QMainWindow, Ui_MainWindow):
         if os.path.isfile(file):
             self.window.updateThread.add.emit(file, purge, self.window.data)
         
-        title = str(self.windowTitle())
-        hasFilenameInTitle = len(title.split('-')) > 1
-        if hasFilenameInTitle:
-            if purge:
-                title = title.split('-')[0] + ' - ' + ntpath.basename(file)
-            else:
-                title = title + ' + ' + ntpath.basename(file)
-        self.setWindowTitle(title)
+            title = str(self.windowTitle())
+            hasFilenameInTitle = len(title.split('-')) > 1
+            if hasFilenameInTitle:
+                if purge:
+                    title = title.split('-')[0] + ' - ' + ntpath.basename(file)
+                else:
+                    title = title + ' + ' + ntpath.basename(file)
+            self.setWindowTitle(title)
         
 
     def discardData(self):
