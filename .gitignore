@@ -2,6 +2,7 @@ dist
 build
 monitor.log
 monitor.spec
+data
 *.pyc
 *.dat
 *.un~
