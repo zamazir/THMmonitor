@@ -691,10 +691,8 @@ class MplLinestyleDialog(QtGui.QDialog):
             names = [p.name for family in self.families.values() for p in family]
         else:
             pass
-            #print "Combo is not a controller"
 
         newValue = combo.currentText()
-        #print "New value:", newValue
                 
         for _combo in self.combos:
             isRightFamily    = _combo.plotName in names
@@ -705,7 +703,6 @@ class MplLinestyleDialog(QtGui.QDialog):
                    ind = _combo.findText(newValue)
                    _combo.setCurrentIndex(ind)
             elif combo.isGlobal:
-                #print "Combo is global"
                 if isRightAttribute and not isController:
                    ind = _combo.findText(newValue)
                    _combo.setCurrentIndex(ind)
@@ -2079,7 +2076,6 @@ class Monitor(QMainWindow, Ui_MainWindow):
 
 
     def receiveDuplicates(self, dups):
-        print "Received duplicates:", dups
         self.window.dups.extend(dups)
         self.window.dups = list(set(self.window.dups))
         
