@@ -65,24 +65,24 @@ mapping = {
     'ADCS Sidepanel Y- Temperature OW3':
         {'subsystem': 'ADCS',
          'component': 'Sidepanel Y-'},
-    'ADCS Sidepanel Z+ Temperature OW1':
-        {'subsystem': 'ADCS',
-         'component': 'Toppanel'},
-    'ADCS Sidepanel Z+ Temperature OW2':
-        {'subsystem': 'ADCS',
-         'component': 'Toppanel'},
-    'ADCS Sidepanel Z+ Temperature OW3':
-        {'subsystem': 'ADCS',
-         'component': 'Toppanel'},
-    'ADCS Sidepanel Z+ Temperature OW4':
-        {'subsystem': 'ADCS',
-         'component': 'Toppanel'},
-    'ADCS Mainpanel Z- Temperature BMX':
+    'ADCS Mainpanel Z+ Temperature BMX':
         {'subsystem': 'ADCS',
          'component': 'Mainpanel'},
-    'ADCS Mainpanel Z- Temperature OW1':
+    'ADCS Mainpanel Z+ Temperature OW1':
         {'subsystem': 'ADCS',
          'component': 'Mainpanel'},
+    'ADCS Mainpanel Z+ Temperature OW2':
+        {'subsystem': 'ADCS',
+         'component': 'Mainpanel'},
+    'ADCS Mainpanel Z+ Temperature OW3':
+        {'subsystem': 'ADCS',
+         'component': 'Mainpanel'},
+    'ADCS Sidepanel Z- Temperature BMX':
+        {'subsystem': 'ADCS',
+         'component': 'Toppanel'},
+    'ADCS Sidepanel Z- Temperature OW1':
+        {'subsystem': 'ADCS',
+         'component': 'Toppanel'},
     'EPS Board Temperature':
         {'subsystem': 'EPS',
          'component': 'EPS Board'},
