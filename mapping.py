@@ -77,10 +77,10 @@ mapping = {
     'ADCS Mainpanel Z+ Temperature OW3':
         {'subsystem': 'ADCS',
          'component': 'Mainpanel'},
-    'ADCS Sidepanel Z- Temperature BMX':
+    'ADCS Payload Z- Temperature BMX':
         {'subsystem': 'ADCS',
          'component': 'Toppanel'},
-    'ADCS Sidepanel Z- Temperature OW1':
+    'ADCS Payload Z- Temperature OW1':
         {'subsystem': 'ADCS',
          'component': 'Toppanel'},
     'EPS Board Temperature':
