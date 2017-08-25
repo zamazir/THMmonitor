@@ -19,7 +19,7 @@ logging.basicConfig(
                 format='%(asctime)s %(message)s', 
                 datefmt='%d/%m/%Y %I:%M:%S %p', 
                 level=logging.ERROR)
-logging.info('\n++++++++++++++ Program started +++++++++++++++++')
+logging.info('\n\n++++++++++++++ Program started +++++++++++++++++\n\n')
 
 # Third party libraries
 #sys.path.insert(1, os.path.join(sys.path[0], '..'))
@@ -449,64 +449,80 @@ class updateThread(QtCore.QThread):
         """ Largely adapted from OPS_housekeeping thm_processor """
         sensorInfo = hkdata.thm_bytes
         totalBytes = hkdata.getTotalBytes()
-        time = 0
+        # Split fileContents after 84 bytes and check if last byte is a newline
+        # If it isn't, discard line, search next newline and try to read the 84
+        # bytes after that
+        start = 0
+        end = 0
         data = []
         size = len(fileContents)
         self.track.emit()
-        for i, line in enumerate(fileContents):
-            self.progress.emit(size, i, 
-                    'Reading binary data (line {} of {})'.format(i,size))
-            if len(line) != totalBytes:
-                logging.error(
-                    "Line contents don't match sensor byte count ({}): Line {}"
-                     .format(totalBytes,i))
-                continue
+        while True:
+            if end > size:
+                break
             lineData = []
-            start = 0
-            end = 0
-
+            skip = 0
+            self.progress.emit(size, start, 
+                    'Reading binary data (line {} of {})'.format(start,size))
             for info in sensorInfo:
                 sensorName = info[0]
                 format     = info[1]
                 interpFunc = info[2]
                 sensorID   = info[3]
 
-                bytecount = struct.calcsize(format)
+                end = start + struct.calcsize(format)
+                rawin = fileContents[start:end]
+
+                try:
+                    rawout = struct.unpack(format, rawin)[0]
+                except struct.error, e:
+                    logging.error("Failed to unpack raw value for {}"
+                                  .format(sensorName) +
+                                  " (value: {}, expected size: {}).\n"
+                                  .format(rawin, struct.calcsize(format)) +
+                                  "The last completely successfully read" +
+                                  " data set was at {} (satellite time)"
+                                  .format(mpl.dates.num2date(time)))
+                    continue
+
+                logging.info('{:40s}: {}-{} {:10} {:10}'
+                              .format(sensorName, start, end - 1,
+                                  rawin.__repr__(), rawout))
+                if sensorName == 'Line terminator':
+                    if rawin != '\n':
+                        logging.error('Expected line break at bytes {} to {}.'
+                                      .format(start, end - 1) +
+                                      ' Got {} instead.\n'.format(rawout) +
+                                      'Discarding data since last line break' +
+                                      ' and skipping to the next one.\n' +
+                                      'Discarded data:\n{}'.format(lineData))
+                        skip = fileContents[end:].find('\n')
+                        start = end + skip + 1
+                        lineData = []
+                        break
                 start = end
-                end = start + bytecount
-
-                rawin = line[start:end]
-                if end > totalBytes:
-                    rawin = line[start:]
-
-                if len(rawin) < bytecount:
-                    logging.error("Error interpreting {} in Line {}: "
-                                    .format(sensorName,i)
-                                   + "Raw value {} has smaller length than expected bytecount {} "
-                                      .format(rawin,bytecount)
-                                   + "and could not be interpreted")
-                    break
                 
-                rawout = struct.unpack(format, rawin)[0]
-
                 # This will only work reliably if the timestamp is the first
-                # value
+                # value after a line terminator
                 if sensorName == 'Timestamp':
                     time = mpl.dates.epoch2num(rawout)
                     continue
-
-                if sensorName == 'Line terminator':
+                if sensorName in ['Line terminator', 'Status']:
                     continue
 
+                try:
+                    time
+                except NameError:
+                    logging.critical("Data was discarded due to lack of a" +
+                    " timestamp. This might have led to wrong timestamps for" +
+                    " other data. Be careful when interpreting this data.")
                 if interpFunc is None:
                     lineData.append([sensorName, time, rawout])
                 else:
                     lineData.append([sensorName, time, interpFunc(rawout)])
-            
             data.append(lineData)
         self.done.emit()
-
-	return data
+        return data
 
 
     def dataFromFile(self, fileName):
@@ -521,7 +537,7 @@ class updateThread(QtCore.QThread):
         """
         # This was adapted from OPS_housekeeping thm_processor
         with open(fileName, 'rb') as f:
-            fileContents = f.readlines()
+            fileContents = f.read()
         data = self.convert(fileContents)
         # This was used to read plain text files
         #data = []
