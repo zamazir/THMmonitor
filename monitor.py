@@ -45,6 +45,8 @@ try:
 except ImportError:
     pygameImported = False
 
+__version__ = '2.1.0'
+
 # Project libraries
 import ops.hkdata as hkdata
 from ops.beaconconvert import *
@@ -1962,6 +1964,8 @@ class Monitor(QMainWindow, Ui_MainWindow):
         super(Monitor, self).__init__()
         self.setupUi(self)
 
+        global __version__
+
         self.createWindow()
 
         self.toolbar = NavigationToolbar(self.window.canvas, self)
@@ -1997,9 +2001,11 @@ class Monitor(QMainWindow, Ui_MainWindow):
         self.statusbar.addPermanentWidget(self.progressbar)
 
         if fileMode:
-            self.setWindowTitle('THM temperature monitor - {}'.format(mode))
+            self.setWindowTitle('THM temperature monitor v{} - {}'
+                                .format(__version__, mode))
         else:
-            self.setWindowTitle('THM temperature monitor - live')
+            self.setWindowTitle('THM temperature monitor v{} - live'
+                                .format(__version__))
         # Header
         columnNames = ['','Color','Live','Sensor']
         header = MyHeader(QtCore.Qt.Horizontal, columnNames, self)
@@ -2042,6 +2048,10 @@ class Monitor(QMainWindow, Ui_MainWindow):
         self.alarmThread.flash.connect(self.showFlashScreen)
         self.alarmThread.stop.connect(self.stopAlarm)
         self.menuAdvancedLinestyleSettings.triggered.connect(self.advancedLinestyleSettings)
+        self.menuAbout_2.triggered.connect(self.about)
+        self.menuOnlineDoc.triggered.connect(
+                functools.partial(self.openLink,
+                    'https://redmine.move2space.de/projects/move2/wiki/How_to_use_the_THM_monitor'))
 
         if not fileMode:
             self.menuChangeSteadyState.triggered.connect(self.changeSteadyStateDefinition)
@@ -2079,6 +2089,22 @@ class Monitor(QMainWindow, Ui_MainWindow):
 
         self.startFeed()
 
+
+    def openLink(self, link):
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(link))
+
+
+    def about(self):
+        """ Shows information about the application in a message box. """
+        global __version__
+        QtGui.QMessageBox.about(self, "About",
+                "THM temperature monitor\n\n" + \
+                "Stream live temperature data or load housekeeping " + \
+                "temperature log files.\n\n"
+
+                "Version: {}\n".format(__version__) + \
+                "Written by: Amazigh Zerzour\n" + \
+                "E-mail: amazigh.zerzour@gmail.com ")
 
     @staticmethod
     def getExtrema(lines):

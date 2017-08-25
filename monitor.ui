@@ -352,10 +352,18 @@ color: rgb(0, 0, 0);</string>
     </widget>
     <addaction name="menuTrigger_test_alarm"/>
    </widget>
+   <widget class="QMenu" name="menuAbout">
+    <property name="title">
+     <string>Help</string>
+    </property>
+    <addaction name="menuAbout_2"/>
+    <addaction name="menuOnlineDoc"/>
+   </widget>
    <addaction name="menuSettings"/>
    <addaction name="menuView"/>
    <addaction name="menuData"/>
    <addaction name="menuTesting"/>
+   <addaction name="menuAbout"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
   <action name="menuChangeSteadyState">
@@ -456,6 +464,16 @@ color: rgb(0, 0, 0);</string>
   <action name="menuRemoveDupMarkers">
    <property name="text">
     <string>Remove duplicate markers</string>
+   </property>
+  </action>
+  <action name="menuAbout_2">
+   <property name="text">
+    <string>About</string>
+   </property>
+  </action>
+  <action name="menuOnlineDoc">
+   <property name="text">
+    <string>Online documentation</string>
    </property>
   </action>
  </widget>
