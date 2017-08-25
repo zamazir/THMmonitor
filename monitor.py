@@ -13,6 +13,7 @@ import bisect
 import ntpath
 import struct
 import functools
+import os
 logging.basicConfig(
                 filename='monitor.log', 
                 filemode='a', 
@@ -86,7 +87,9 @@ else:
 ##############################################################################
 # Load UI
 ##############################################################################
-Ui_MainWindow, QMainWindow = loadUiType('monitor.ui')
+script_dir = os.path.dirname(os.path.realpath(__file__))
+UIpath = os.path.join(script_dir, 'monitor.ui')
+Ui_MainWindow, QMainWindow = loadUiType(UIpath)
 
 
 ##############################################################################
