@@ -463,7 +463,7 @@ class updateThread(QtCore.QThread):
         size = len(fileContents)
         self.track.emit()
         while True:
-            if end > size:
+            if end >= size:
                 break
             lineData = []
             skip = 0
