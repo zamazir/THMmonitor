@@ -1,0 +1,8 @@
+{
+    "hostname" : "tumwlrt-move-ii-test.srv.mwn.de",
+    "port" : 5672,
+    "exchange" : "parser",
+    "bindingKey" : "alert",
+    "user" : "guest",
+    "pass" : "guest"
+}

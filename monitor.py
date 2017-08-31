@@ -4,6 +4,8 @@
 # Imports
 ##############################################################################
 # Native libraries
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 import sys
 import os
 import logging
@@ -19,7 +21,7 @@ logging.basicConfig(
                 filemode='a', 
                 format='%(asctime)s %(message)s', 
                 datefmt='%d/%m/%Y %I:%M:%S %p', 
-                level=logging.ERROR)
+                level=logging.DEBUG)
 logging.info('\n\n++++++++++++++ Program started +++++++++++++++++\n\n')
 
 # Third party libraries
@@ -46,12 +48,15 @@ try:
 except ImportError:
     pygameImported = False
 
-__version__ = '2.1.0'
-
 # Project libraries
 import ops.hkdata as hkdata
 from ops.beaconconvert import *
 import mapping
+from rabbitmq import RabbitMQClient
+
+__version__ = '3.0.0'
+beaconTime = 0
+globalData = {}
 
 
 ##############################################################################
@@ -64,20 +69,24 @@ mpl.rcParams['svg.fonttype'] = 'none'
 ##############################################################################
 # Argument Parsing
 ##############################################################################
-modes = ['simulation','tvac']
+modes = ['simulation','tvac','em', 'fm']
 args = sys.argv
 fileMode = False
 if len(args) >= 2:
     fileMode = os.path.isfile(args[1])
     if args[1] in modes or fileMode:
         mode = args[1]
-        print "mode {} is a known mode or a file".format(mode)
+        print("mode {} is a known mode or a file".format(mode))
         logging.info("Received mode {} as command line argument".format(mode))
+        if mode == 'em':
+            rabbitMQConfig = 'config/rabbitmq_em.json'
+        elif mode == 'fm':
+            rabbitMQConfig = 'config/rabbitmq_fm.json'
     else:
-        print "Unknown mode {}. Possible modes are {}.".format(args[1], modes)
+        print("Unknown mode {}. Possible modes are {}.".format(args[1], modes))
         exit()
 else:
-    print "TVAC mode"
+    print("TVAC mode")
     mode = 'tvac'
     logging.info("Received no mode as command line argument. "
                  + "Assuming tvac mode")
@@ -260,6 +269,32 @@ class AlarmThread(QtCore.QThread):
         self.startAlarm()
 
 
+class ConsumerThread(QtCore.QThread):
+    refresh_feed = pyqtSignal('PyQt_PyObject')
+
+    def run(self):
+        print("Waiting for beacons...")
+        def callback(self, channel, method, properties, body):
+            global beaconTime
+            body = eval(body)
+            if method.routing_key == 'CDH':
+                beaconTime = body['Beacon Timestamp']
+                beaconTime = datetime.datetime.strptime(beaconTime, '%Y-%m-%dT%H:%M:%S')
+            elif method.routing_key == 'THM':
+                print("Received beacon")
+                print(body)
+                del body['Beacon Timestamp']
+                del body['Beacon Version']
+                del body['Source']
+                del body['Source ID']
+                data = []
+                for sensor, value in body.items():
+                    data.append([sensor, beaconTime, value])
+                self.emit(SIGNAL('refresh_feed(PyQt_PyObject)'), data)
+
+        rmq = RabbitMQClient(rabbitMQConfig)
+        rmq.start(functools.partial(callback, self))
+
 
 class updateThread(QtCore.QThread):
     """
@@ -403,9 +438,9 @@ class updateThread(QtCore.QThread):
                         dt = mpl.dates.num2date(x[ind])
                         date = dt.date()
                         time = dt.time()
-                        print "Two different values for sensor {} at {} {} found: "\
+                        print("Two different values for sensor {} at {} {} found: "\
                                 .format(sensor, date, time) +\
-                                "Old: {}, New: {}.".format(y[ind], newy)
+                                "Old: {}, New: {}.".format(y[ind], newy))
                         dups.append(newx)
                 newx = np.array([newx])
                 newy = np.array([newy])
@@ -480,7 +515,7 @@ class updateThread(QtCore.QThread):
 
                 try:
                     rawout = struct.unpack(format, rawin)[0]
-                except struct.error, e:
+                except struct.error as e:
                     logging.error("Failed to unpack raw value for {}"
                                   .format(sensorName) +
                                   " (value: {}, expected size: {}).\n"
@@ -575,7 +610,6 @@ class updateThread(QtCore.QThread):
             self.processFileData(data)
             return
             
-        
         while True:
             for line in sys.stdin:
                 if mode == 'simulation':
@@ -589,8 +623,8 @@ class updateThread(QtCore.QThread):
                     else:
                         continue
 
-                print "\n", datetime.datetime.now()
-                print "Received beacon data:", line
+                print("\n", datetime.datetime.now())
+                print("Received beacon data:", line)
                 if len(line) == 0:
                     logging.warning("No beacon data received. Retrying in 5 seconds...")
                     self.handleError()
@@ -900,7 +934,7 @@ class MplLinestyleDialog(QtGui.QDialog):
                         'cubehelix', 'brg', 'hsv', 'rainbow', 'jet', 'nipy_spectral',
                         'gist_ncar'])
             else:
-                print "Available styles for {} must be specified".format(attribute)
+                print("Available styles for {} must be specified".format(attribute))
                 return
 
         combo = self._addCombo(attribute, pos, plotName, styles, currentStyle,
@@ -955,7 +989,7 @@ class MplLinestyleDialog(QtGui.QDialog):
     @staticmethod
     def getStyles(parent = None, family = None, colormaps = None):
         if family is None or colormaps is None:
-            print "Plot family and colormaps must be specified"
+            print("Plot family and colormaps must be specified")
             return {}
         dialog = MplLinestyleDialog(parent, family, colormaps)
         result = dialog.exec_()
@@ -1160,6 +1194,9 @@ class Window(QtCore.QObject):
         self.gui = gui
         self.fig.canvas.mpl_connect('motion_notify_event',self.onMove)
         self.fig.canvas.mpl_connect('button_release_event',self.onRelease)
+        self.connect(self.gui.consumer, 
+                            SIGNAL('refresh_feed(PyQt_PyObject)'), 
+                            self.update)
 
 
     def updateAverage(self, points, method):
@@ -1183,8 +1220,8 @@ class Window(QtCore.QObject):
 
             try:
                 x, y = self.average(x, y, points, method)
-            except AttributeError, e:
-                print str(e)
+            except AttributeError as e:
+                print(str(e))
 
             graph.set_xdata(x)
             graph.set_ydata(y)
@@ -1278,7 +1315,7 @@ class Window(QtCore.QObject):
             datetimesFiltered = []
 
             self.track.emit()
-            print "Getting TVAC temperatures"
+            print("Getting TVAC temperatures")
             for i, line in enumerate(lines):
                 if i%5 == 0:
                     self.progress.emit(size, i, 
@@ -1392,7 +1429,7 @@ class Window(QtCore.QObject):
             self.compareAx.set_ylabel('TVAC temperature [$^\circ$C]')
             self.zoomOut(self.compareAx)
         else:
-            print "Didn't recognize quantity"
+            print("Didn't recognize quantity")
         self.canvas.draw()
 
 
@@ -1448,7 +1485,7 @@ class Window(QtCore.QObject):
             if plotted:
                 graph = self.graphs[sensor.name]
             else:
-                print 'Sensor without graph encountered: {}'.format(sensor.name)
+                print('Sensor without graph encountered: {}'.format(sensor.name))
                 logging.error(
                     "Graph for sensor {} seems to not have been initialized."\
                     .format(sensor.name))
@@ -1466,7 +1503,11 @@ class Window(QtCore.QObject):
         if fileMode or mode == 'simulation':
             # str should already be a mpl date in this case
             return str
-        time = datetime.datetime.strptime(str, '%Y-%m-%dT%H:%M:%S')
+
+        if type(str).__name__ != 'datetime':
+            time = datetime.datetime.strptime(str, '%Y-%m-%dT%H:%M:%S')
+        else:
+            time = str
 
         # Convert time zones (UTC --> local)
         time = time + datetime.timedelta(hours=self.gui.timeZone)
@@ -1491,8 +1532,8 @@ class Window(QtCore.QObject):
             except ValueError:
                 y = np.nan
             except TypeError:
-                print "{} cannot be converted to float.".format(y) +\
-                "Argument must be a string or a number"
+                print("{} cannot be converted to float.".format(y) +\
+                "Argument must be a string or a number")
                 y = np.nan
 
             timestamp = self.str2mpldate(x)
@@ -1525,8 +1566,8 @@ class Window(QtCore.QObject):
             if sub in self.colormaps:
                 colormap = getattr(cm, self.colormaps[sub])
             else:
-                print "No colormap specified for subsystem {}. ".format(sub)+\
-                        "Using gist_rainbow."
+                print("No colormap specified for subsystem {}. ".format(sub)+\
+                        "Using gist_rainbow.")
                 colormap = getattr(cm, 'gist_rainbow')
             colorsBySubsystem[sub] = colormap(np.linspace(0,1,sensorsInSub))
 
@@ -1655,12 +1696,59 @@ class Window(QtCore.QObject):
         self.canvas.draw()
 
 
+    def _appendBeaconData(self, data, newData):
+        print("Adding data to globalData:", newData)
+        for sensorData in newData:
+            sensor  = sensorData[0]
+            print("Adding to", sensor)
+            time    = self.str2mpldate(sensorData[1])
+            value   = float(sensorData[2])
+            print("Time: ", time)
+            print("Value: ", value)
+
+            if sensor not in data:
+                data[sensor] = []
+                data[sensor].append([time,])
+                data[sensor].append([value,])
+            else:
+                data[sensor][0].append(time)
+                data[sensor][1].append(value)
+
+            # Sort by time
+            times = data[sensor][0]
+            values = data[sensor][1]
+            
+            times, values= zip(*sorted(zip(times, values)))
+
+            data[sensor][0] = times
+            data[sensor][1] = values
+        return data
+
+
     def update(self, data, live=True):
         """ 
         Append data and re-draw canvas. This method is only invoked in live mode
         """
+        global globalData
+
+        # Display warning if warning state
+        for sensorData in data:
+            sensor = sensorData[0]
+            if sensor in ('THM System State','State','System State'):
+                newy = sensorData[2]
+                if newy == 1:
+                    logging.warning('SYSTEM IN WARNING STATE')
+                    self.gui.warning(newy)
+                elif newy == 2:
+                    logging.warning('!!!!!! SYSTEM IN CRITICAL STATE !!!!!!')
+                    self.gui.warning(newy)
+                break
+
         if len(self.graphs) == 0:
             self.initGraphs(data)
+            
+        globalData = self._appendBeaconData(globalData, data)
+        print(globalData)
 
         selectedSensors = self.getSelectedSensors()
 
@@ -1674,53 +1762,27 @@ class Window(QtCore.QObject):
         except:
             xLimit  = None
         
-        for sensorData in data:
-            sensor  = sensorData[0]
-            newx    = sensorData[1]
-            newy    = sensorData[2]
-            if sensor in ('THM System State','State','System State'):
-                if newy == 1:
-                    logging.warning('SYSTEM IN WARNING STATE')
-                    self.gui.warning(newy)
-                elif newy == 2:
-                    logging.warning('!!!!!! SYSTEM IN CRITICAL STATE !!!!!!')
-                    self.gui.warning(newy)
-                continue
-
+        for sensor, sensorData in globalData.items():
+            times, values = sensorData
             selected = sensor in selectedSensors
             graph   = self.graphs[sensor]
-            oldData = graph.get_xydata()
 
-            try:
-                newy = float(newy)
-            except ValueError:
-                newy = np.nan
-            newx = self.str2mpldate(newx)
+            if live:
+                self.checkSteadyState(sensor, times, values)
 
-            if len(oldData) == 0:
-                x = [newx]
-                y = [newy]
-            else:
-                x = [_x for _x,_ in oldData]
-                x.append(newx)
-                y = [_y for _,_y in oldData]
-                y.append(newy)
-
-                if live:
-                    self.checkSteadyState(sensor,x,y)
             # This might lead to problems if the program has been running for
             # a long time and xtot gets huge. Consider reducing it to unique
             # values
-            xtot.extend(x)
-            ytot.extend(y)
+            xtot.extend(times)
+            ytot.extend(values)
 
-            # Sort data by time so lines between points don't go crazy
-            x, y = zip(*sorted(zip(x,y)))
+            logging.debug("Current data for {}:".format(sensor))
+            logging.debug(list(zip(x,y)))
 
             # Show current temperature values
             # This has to happen after the arrays were chronologically sorted
             try:
-                self.gui.tempLabels[sensor].setText('{:.1f}'.format(y[-1]) + u'\u00b0C')
+                self.gui.tempLabels[sensor].setText('{:.1f}'.format(values[-1]) + u'\u00b0C')
                 self.gui.tempLabels[sensor].update()
             except:
                 pass
@@ -1731,21 +1793,22 @@ class Window(QtCore.QObject):
                 pass
             marker = self.marker
             if self.gui.cbShowLines.isChecked():
-                graph = self.ax.plot_date(x,y,
-                                    color=self.colors[sensor],
-                                    marker=marker,
-                                    ls='solid')[0]
+                graph = self.ax.plot_date(times , values,
+                                            color=self.colors[sensor],
+                                            marker=marker,
+                                            ls='solid')[0]
             else:
-                graph = self.ax.plot_date(x,y,
-                                    color=self.colors[sensor],
-                                    marker=None,
-                                    ls='none')[0]
+                graph = self.ax.plot_date(times , values,
+                                            color=self.colors[sensor],
+                                            marker=None,
+                                            ls='none')[0]
 
             if not selected:
                 graph.set_visible(False)
 
             self.graphs[sensor] = graph
 
+        # Adjust view
         if fixedView:
             self.ax.set_xlim(oldxLim)
             self.ax.set_ylim(oldyLim)
@@ -1767,10 +1830,16 @@ class Window(QtCore.QObject):
                         maxDate+= datetime.timedelta(minutes = minutes/10 )
                         self.ax.set_xlim([maxDate-xLimit,maxDate])
                     else:
-                        padRight = (maxDate-xmin)/20
+                        try:
+                            padRight = (maxDate-xmin)/20
+                        except TypeError:
+                            padRight = datetime.timedelta(minutes=5)
                         self.ax.set_xlim(xmin,maxDate+padRight)
                 else:
-                    padRight = (maxDate-xmin)/20
+                    try:
+                        padRight = (maxDate-xmin)/20
+                    except TypeError:
+                        padRight = datetime.timedelta(minutes=5)
                     self.ax.set_xlim(xmin,maxDate+padRight)
 
         if self.gui.sensorTable.rowCount() == 0:
@@ -1786,7 +1855,7 @@ class Window(QtCore.QObject):
         if len(sensorList) > 0:
             sensor = sensorList[0]
         else:
-            print "No sensor {} found".format(sensorName)
+            print("No sensor {} found".format(sensorName))
             sensor = None
         return sensor
         
@@ -1969,6 +2038,7 @@ class Monitor(QMainWindow, Ui_MainWindow):
 
         global __version__
 
+        self.consumer = ConsumerThread()
         self.createWindow()
 
         self.toolbar = NavigationToolbar(self.window.canvas, self)
@@ -2003,12 +2073,8 @@ class Monitor(QMainWindow, Ui_MainWindow):
         self.progressbar.setMaximum(100)
         self.statusbar.addPermanentWidget(self.progressbar)
 
-        if fileMode:
-            self.setWindowTitle('THM temperature monitor v{} - {}'
-                                .format(__version__, mode))
-        else:
-            self.setWindowTitle('THM temperature monitor v{} - live'
-                                .format(__version__))
+        self.setWindowTitle('THM temperature monitor v{} - {}'
+                            .format(__version__, mode))
         # Header
         columnNames = ['','Color','Live','Sensor']
         header = MyHeader(QtCore.Qt.Horizontal, columnNames, self)
@@ -2090,7 +2156,14 @@ class Monitor(QMainWindow, Ui_MainWindow):
         self.window.track.connect(self.startTrackingProgress)
         self.window.doneSig.connect(self.stopTrackingProgress)
 
-        self.startFeed()
+        if mode in ('em', 'fm'):
+            self.startConsuming()
+        else:
+            self.startFeed()
+
+
+    def startConsuming(self):
+        self.consumer.start()
 
 
     def openLink(self, link):
@@ -2159,49 +2232,61 @@ class Monitor(QMainWindow, Ui_MainWindow):
                         patch = self.patches[name]
                         color = [c*255 for c in style]
                         patch.setColor(color, 'rgb')
-                    #print "{} of plot {} is now {}".format(attribute,name,style)
+                    #print("{} of plot {} is now {}".format(attribute,name,style))
                     mpl.artist.setp(self.window.graphs[name], **{attribute:style})
 
             self.window.canvas.draw()
         
 
     def showWarningPopup(self):
-        msg = QtGui.QMessageBox()
-        msg.setIcon(QtGui.QMessageBox.Warning)
-        msg.setText( 'System state: <span style="font-weight:bold">WARNING</span>')
-        msg.setInformativeText('Check subsystem temperatures and adjust operational mode and/or shroud temperature')
-        msg.setWindowTitle('System state warning')
-        msg.setStandardButtons(QtGui.QMessageBox.Ok)
-        msg.setStyleSheet("QLabel{min-width: 200px;}")
-        msg.buttonClicked.connect(self.stopAlarm)
+        try:
+            self.warnMsg.close()
+        except:
+            pass
+        self.warnMsg = QtGui.QMessageBox()
+        self.warnMsg.setIcon(QtGui.QMessageBox.Warning)
+        self.warnMsg.setText( 'System state: <span style="font-weight:bold">WARNING</span>')
+        self.warnMsg.setInformativeText('Check subsystem temperatures and adjust operational mode and/or shroud temperature')
+        self.warnMsg.setWindowTitle('System state warning')
+        self.warnMsg.setStandardButtons(QtGui.QMessageBox.Ok)
+        self.warnMsg.setStyleSheet("QLabel{min-width: 200px;}")
+        self.warnMsg.buttonClicked.connect(self.stopAlarm)
 
         # Jump to front
         self.setWindowState(self.windowState() & ~QtCore.Qt.WindowMinimized | QtCore.Qt.WindowActive)
         self.activateWindow()
-        msg.setWindowState(msg.windowState() & ~QtCore.Qt.WindowMinimized | QtCore.Qt.WindowActive)
-        msg.activateWindow()
+        self.warnMsg.setWindowState(self.warnMsg.windowState() & ~QtCore.Qt.WindowMinimized | QtCore.Qt.WindowActive)
+        self.warnMsg.activateWindow()
 
-        msg.exec_()
+        self.warnMsg.exec_()
 
 
     def showCriticalPopup(self):
-        msg = QtGui.QMessageBox()
-        msg.setIcon(QtGui.QMessageBox.Critical)
-        msg.setText( 'System state: <span style="font-weight:bold">CRITICAL</span>')
-        msg.setInformativeText('Safe mode may have to be entered! Check sensor temperatures.')
-        msg.setDetailedText('One or more of the sensors are reading temperature values exceeding the allowed range. Check if this is just a read-out error. If not, immediately enter safe mode')
-        msg.setWindowTitle('System state warning')
-        msg.setStandardButtons(QtGui.QMessageBox.Ok)
-        msg.setStyleSheet("QLabel{min-width: 200px;}")
-        msg.buttonClicked.connect(self.stopAlarm)
+        try:
+            self.critMsg.quit()
+        except:
+            pass
+        try:
+            self.warnMsg.quit()
+        except:
+            pass
+        self.critMsg = QtGui.QMessageBox()
+        self.critMsg.setIcon(QtGui.QMessageBox.Critical)
+        self.critMsg.setText( 'System state: <span style="font-weight:bold">CRITICAL</span>')
+        self.critMsg.setInformativeText('Safe mode may have to be entered! Check sensor temperatures.')
+        self.critMsg.setDetailedText('One or more of the sensors are reading temperature values exceeding the allowed range. Check if this is just a read-out error. If not, immediately enter safe mode')
+        self.critMsg.setWindowTitle('System state warning')
+        self.critMsg.setStandardButtons(QtGui.QMessageBox.Ok)
+        self.critMsg.setStyleSheet("QLabel{min-width: 200px;}")
+        self.critMsg.buttonClicked.connect(self.stopAlarm)
 
         # Jump to front
         self.setWindowState(self.windowState() & ~QtCore.Qt.WindowMinimized | QtCore.Qt.WindowActive)
         self.activateWindow()
-        msg.setWindowState(msg.windowState() & ~QtCore.Qt.WindowMinimized | QtCore.Qt.WindowActive)
-        msg.activateWindow()
+        self.critMsg.setWindowState(self.critMsg.windowState() & ~QtCore.Qt.WindowMinimized | QtCore.Qt.WindowActive)
+        self.critMsg.activateWindow()
 
-        msg.exec_()
+        self.critMsg.exec_()
 
 
     def startTrackingProgress(self):
@@ -2636,6 +2721,7 @@ class Monitor(QMainWindow, Ui_MainWindow):
 
 
     def warning(self, level):
+        return
         if level == 1:
             self.alarmThread.level = level
             self.alarmThread.start()
@@ -2915,8 +3001,8 @@ class Sensor():
             self.subsystem = self.mapping[name]['subsystem']
             self.component = self.mapping[name]['component']
         else:
-            print "No component/subsystem found for sensor {}. ".format(name)+\
-                    "Make sure this sensor has a mapping in the supplied mapping dict"
+            print("No component/subsystem found for sensor {}. ".format(name)+\
+                    "Make sure this sensor has a mapping in the supplied mapping dict")
             self.subsystem = 'None'
             self.component = 'None'
         self.steady = False
