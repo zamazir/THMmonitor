@@ -54,7 +54,7 @@ from ops.beaconconvert import *
 import mapping
 from rabbitmq import RabbitMQClient
 
-__version__ = '3.0.0'
+__version__ = '3.1.0'
 beaconTime = 0
 globalData = {}
 
@@ -1699,42 +1699,40 @@ class Window(QtCore.QObject):
     def _appendBeaconData(self, data, newData):
         print("Adding data to globalData:", newData)
         for sensorData in newData:
-            sensor  = sensorData[0]
+            sensor = sensorData[0]
             print("Adding to", sensor)
-            time    = self.str2mpldate(sensorData[1])
-            value   = float(sensorData[2])
+            time = self.str2mpldate(sensorData[1])
+            value = float(sensorData[2])
             print("Time: ", time)
             print("Value: ", value)
 
             if sensor not in data:
-                data[sensor] = []
-                data[sensor].append([time,])
-                data[sensor].append([value,])
-            else:
-                data[sensor][0].append(time)
-                data[sensor][1].append(value)
+                data[sensor] = [[], []]
+            data[sensor][0].append(time)
+            data[sensor][1].append(value)
 
             # Sort by time
             times = data[sensor][0]
             values = data[sensor][1]
-            
-            times, values= zip(*sorted(zip(times, values)))
 
-            data[sensor][0] = times
-            data[sensor][1] = values
+            times, values = zip(*sorted(zip(times, values)))
+
+            data[sensor][0] = list(times)
+            data[sensor][1] = list(values)
         return data
 
 
     def update(self, data, live=True):
-        """ 
-        Append data and re-draw canvas. This method is only invoked in live mode
+        """
+        Append data and re-draw canvas. This method is only invoked in live
+        mode.
         """
         global globalData
 
         # Display warning if warning state
         for sensorData in data:
             sensor = sensorData[0]
-            if sensor in ('THM System State','State','System State'):
+            if sensor in ('THM System State', 'State', 'System State'):
                 newy = sensorData[2]
                 if newy == 1:
                     logging.warning('SYSTEM IN WARNING STATE')
@@ -1746,7 +1744,7 @@ class Window(QtCore.QObject):
 
         if len(self.graphs) == 0:
             self.initGraphs(data)
-            
+
         globalData = self._appendBeaconData(globalData, data)
         print(globalData)
 
@@ -1777,7 +1775,7 @@ class Window(QtCore.QObject):
             ytot.extend(values)
 
             logging.debug("Current data for {}:".format(sensor))
-            logging.debug(list(zip(x,y)))
+            logging.debug(list(zip(times, values)))
 
             # Show current temperature values
             # This has to happen after the arrays were chronologically sorted
