@@ -41,7 +41,7 @@ import ops.hkdata as hkdata
 import mapping
 from rabbitmq import RabbitMQClient
 
-__version__ = '3.2.0'
+__version__ = '3.2.1'
 
 logging.basicConfig(filename='monitor.log',
                     filemode='a',
@@ -282,7 +282,6 @@ class ConsumerThread(QtCore.QThread):
             body = eval(body)
             if method.routing_key == 'CDH':
                 beaconTime = body['Beacon Timestamp']
-                print("Received timestamp:", beaconTime)
                 beaconTime = datetime.datetime.strptime(beaconTime,
                                                         '%Y-%m-%dT%H:%M:%S')
             elif method.routing_key == 'THM':
@@ -561,8 +560,6 @@ class updateThread(QtCore.QThread):
                     else:
                         continue
 
-                print("\n", datetime.datetime.now())
-                print("Received beacon data:", line)
                 if len(line) == 0:
                     logging.warning("No beacon data received. " +
                                     "Retrying in 5 seconds...")
@@ -1722,7 +1719,6 @@ class Window(QtCore.QObject):
             self.initGraphs(data)
 
         globalData = self._appendBeaconData(globalData, data)
-        print(globalData)
 
         selectedSensors = self.getSelectedSensors()
 
