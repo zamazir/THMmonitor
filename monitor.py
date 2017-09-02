@@ -282,10 +282,11 @@ class ConsumerThread(QtCore.QThread):
             body = eval(body)
             if method.routing_key == 'CDH':
                 beaconTime = body['Beacon Timestamp']
+                print("Received timestamp:", beaconTime)
                 beaconTime = datetime.datetime.strptime(beaconTime,
                                                         '%Y-%m-%dT%H:%M:%S')
             elif method.routing_key == 'THM':
-                print("Received beacon")
+                print("Received THM beacon")
                 print(body)
                 del body['Beacon Timestamp']
                 del body['Beacon Version']
@@ -1674,14 +1675,12 @@ class Window(QtCore.QObject):
 
 
     def _appendBeaconData(self, data, newData):
-        print("Adding data to globalData:", newData)
         for sensorData in newData:
-            sensor = sensorData[0]
-            print("Adding to", sensor)
+            sensor = str(sensorData[0])
+            if sensor == 'THM System State':
+                continue
             time = self.str2mpldate(sensorData[1])
             value = float(sensorData[2])
-            print("Time: ", time)
-            print("Value: ", value)
 
             if sensor not in data:
                 data[sensor] = [[], []]
