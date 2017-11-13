@@ -41,17 +41,28 @@ import ops.hkdata as hkdata
 import mapping
 from rabbitmq import RabbitMQClient
 
-__version__ = '3.2.1'
+__version__ = '3.2.0'
 
 logging.basicConfig(filename='monitor.log',
                     filemode='a',
-                    format='%(asctime)s %(message)s',
+                    format='[%(asctime)s %(module)s:%(lineno)s] '
+                           '%(levelname)-8s %(message)s',
                     datefmt='%d/%m/%Y %I:%M:%S %p',
                     level=logging.DEBUG)
 logging.info('\n\n++++++++++++++ Program started +++++++++++++++++\n\n')
 
+logger = logging.getLogger(__name__)
+hdlr = logging.FileHandler('rawdata.log')
+formatter = logging.Formatter('[%(asctime)s %(module)s:%(lineno)s] '
+                              '%(levelname)-8s %(message)s')
+hdlr.setFormatter(formatter)
+logger.addHandler(hdlr)
+logger.setLevel(logging.INFO)
+
 beaconTime = 0
 globalData = {}
+rawtime = {}
+rawdata = {}
 
 
 ##############################################################################
@@ -284,7 +295,10 @@ class ConsumerThread(QtCore.QThread):
                 beaconTime = body['Beacon Timestamp']
                 beaconTime = datetime.datetime.strptime(beaconTime,
                                                         '%Y-%m-%dT%H:%M:%S')
-            elif method.routing_key == 'THM':
+            if type(beaconTime).__name__ != 'datetime':
+                return
+
+            if method.routing_key == 'THM':
                 print("Received THM beacon")
                 print(body)
                 del body['Beacon Timestamp']
@@ -1416,9 +1430,9 @@ class Window(QtCore.QObject):
         """
         for line in self.ax.lines:
             times = line.get_xdata()
-            date = mpl.dates.num2date(time)
             delta = datetime.timedelta(hours=tzDelta)
-            times = [mpl.dates.date2num(date + delta) for time in times]
+            times = [mpl.dates.date2num(mpl.dates.num2date(time) + delta)
+                     for time in times]
             line.set_xdata(times)
         self.canvas.draw()
 
@@ -1482,7 +1496,7 @@ class Window(QtCore.QObject):
         else:
             time = str
 
-        # Convert time zones (UTC --> local)
+        # Convert time zones (CET --> local)
         time = time + datetime.timedelta(hours=self.gui.timeZone)
         return mpl.dates.date2num(time)
 
@@ -1672,8 +1686,16 @@ class Window(QtCore.QObject):
 
 
     def _appendBeaconData(self, data, newData):
+        global rawtime
+        global rawdata
         for sensorData in newData:
             sensor = str(sensorData[0])
+            if sensor not in rawtime:
+                rawtime[sensor] = []
+                rawdata[sensor] = []
+            rawtime[sensor].append(sensorData[1])
+            rawdata[sensor].append(sensorData[2])
+
             if sensor == 'THM System State':
                 continue
             time = self.str2mpldate(sensorData[1])
@@ -1692,6 +1714,12 @@ class Window(QtCore.QObject):
 
             data[sensor][0] = list(times)
             data[sensor][1] = list(values)
+
+        logger.info('{}'.format(datetime.datetime.now()))
+        logger.info(rawtime)
+        logger.info(rawdata)
+        logger.info('\n\n')
+
         return data
 
 
@@ -2036,7 +2064,7 @@ class Monitor(QMainWindow, Ui_MainWindow):
 
         self.steadyStateThreshold = 0.5
         self.steadyStateTimeRange = 60
-        self.timeZone = 2
+        self.timeZone = 0
         self._points = 2
         self._averageMethod = 'mean'
         self.dupLines = []
@@ -2525,12 +2553,13 @@ class Monitor(QMainWindow, Ui_MainWindow):
 
 
     def updateTimeZoneText(self):
-        if self.timeZone > 0:
-            text = ('Your timezone is ' +
-                    '<span style="font-weight:bold">UTC+{}</span>'
-                    .format(self.timeZone))
+        if self.timeZone >= 0:
+            dtz = '+' + str(self.timeZone)
         else:
-            text = "Your timezone is UTC{}".format(self.timeZone)
+            dtz = self.timeZone
+        text = ('Your timezone is ' +
+                '<span style="font-weight:bold">CET{}</span>'
+                .format(dtz))
         self.statusTimeZone.setText(text)
         self.statusTimeZone.update()
 
@@ -2539,7 +2568,7 @@ class Monitor(QMainWindow, Ui_MainWindow):
         tzDialog = QtGui.QInputDialog(self)
         tz, ok = tzDialog.getText(self,
                                   'Insert your time zone',
-                                  'Your offset from UTC in hours:',
+                                  'Your offset from CET in hours:',
                                   QtGui.QLineEdit.Normal,
                                   str(self.timeZone))
         if ok:

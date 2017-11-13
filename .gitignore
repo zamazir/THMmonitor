@@ -5,6 +5,9 @@ monitor.spec
 monitor
 monitor32
 data
+img
+matplotlib-*
 *.pyc
 *.dat
 *.un~
+*.log
